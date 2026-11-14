@@ -86,6 +86,12 @@ class RecorderTest(unittest.TestCase):
         self.assertEqual(len(idx), 3)  # 머리줄 + 출탕 2줄
         self.assertEqual(idx[2][idx[0].index("출탕번호")], "2")
 
+        from rsp_logger.ui.history import load_run
+        meta, hdr, data = load_run(p)
+        self.assertIn(("시료명", "Fe/Si B:1"), meta)
+        self.assertIn("출탕구간번호", hdr)
+        self.assertEqual(len(data), len(s))
+
         raw = series(p.with_name(p.stem + "_raw.csv"))
         self.assertEqual(raw[1]["p_upper"], "20")
 

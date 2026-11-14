@@ -1,0 +1,42 @@
+# RSP Logger
+
+리본 멜트스피너(RSP) 공정값을 LS XGB PLC에서 **읽기 전용**으로 수집·기록하는 Windows 프로그램.
+PLC에 쓰거나 PLC를 제어하는 기능은 없습니다 (XGT 읽기 명령 0x0054만 사용).
+
+개발자: KIM YEONGDO
+
+## 설치·실행
+1. [Releases](../../releases/latest)에서 `RSP_Logger.exe`를 받아 원하는 폴더에 둡니다.
+2. 처음 실행하면 exe 옆에 `config` 폴더(설정·태그)가 생기고, 기록은 exe 옆 `data` 폴더에 저장됩니다.
+3. 새 버전이 나오면 실행할 때 업데이트를 물어봅니다.
+
+PLC 없이 화면을 보려면 개발 모드로 실행합니다: `RSP_Logger.exe --dev` (가상 PLC, 기록은 `data_dev`).
+
+## 현장 연결
+- 노트북 랜 어댑터에 PLC와 같은 대역(예: 192.168.1.x)의 고정 IP를 설정합니다. 다른 장비와 겹치지 않게 합니다.
+- PLC 주소·포트는 `config/settings.toml`의 `[plc]`에서 바꿉니다.
+- 값 패널의 숫자 위에 마우스를 올리면 PLC 원시값이 보입니다. HMI 값과 비교해 `config/tags.csv`의 배율을 맞춥니다.
+
+## 사용 순서
+1. 오른쪽에 시료명(필수)과 Run 정보를 적고 **기록 시작**.
+2. 출탕은 스토퍼 상승램프(M151)가 켜지면 자동으로 시작됩니다. 놓치면 **출탕 시작(수동)**.
+3. 출탕이 끝나면 **출탕 종료**를 누릅니다 (자동 종료 없음).
+4. **기록 정지** 후 리본 결과(폭·두께·외관·비정질 여부)를 적습니다 (비워도 됨).
+
+## 저장 파일 (`data` 폴더)
+| 파일 | 내용 |
+|---|---|
+| `YYYYMMDD_HHMM_시료명.csv` | `#` 메타데이터, 시계열(환산값·계산값·출탕구간번호·이벤트), 출탕 요약 |
+| `..._raw.csv` | 같은 시각의 PLC 원시 정수값 (배율이 바뀌어도 재계산 가능) |
+| `run_index.csv` | 출탕 구간마다 한 줄 요약 (여러 Run 비교용) |
+
+출탕 구간 [시작 − 10초, 종료 + 30초]는 0.2초 간격, 그 밖은 1초 간격으로 저장합니다 (`settings.toml`의 `[ejection]`).
+
+## 개발
+```
+pip install PySide6 pyqtgraph pyinstaller
+python -m unittest discover -s tests      # 테스트
+cd src; python -m rsp_logger --dev         # 개발 모드 실행
+cd src; python -m rsp_logger.conntest --host 192.168.1.2 D401 M382   # 연결 테스트(콘솔)
+.\build.ps1                                # exe 빌드 -> dist\RSP_Logger.exe
+```

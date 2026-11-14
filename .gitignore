@@ -3,3 +3,8 @@ __pycache__/
 *.pyc
 data/
 data_dev/
+docs/
+CLAUDE.md
+build/
+dist/
+*.spec

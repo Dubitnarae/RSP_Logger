@@ -1,15 +1,17 @@
 """메인 화면 (SPEC 9장): 상단 상태줄·좌측 값 패널·중앙 추세 그래프·우측 Run 입력과 기록 버튼."""
-from collections import deque
-
-import pyqtgraph as pg
-from PySide6.QtCore import QObject, Qt, Signal
+import threading
 import time
+from collections import deque
+from pathlib import Path
 
-from PySide6.QtWidgets import (QCheckBox, QDialog, QDialogButtonBox, QFormLayout, QGridLayout, QHBoxLayout,
-                               QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton, QScrollArea,
-                               QVBoxLayout, QWidget)
+# PySide6 를 pyqtgraph(numpy) 보다 먼저 불러온다 — 순서가 바뀌면 이 PC에서 QtCore DLL 로드 실패
+from PySide6.QtCore import QObject, Qt, Signal
+from PySide6.QtWidgets import (QApplication, QCheckBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
+                               QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMessageBox,
+                               QPushButton, QScrollArea, QVBoxLayout, QWidget)
+import pyqtgraph as pg  # noqa: E402,I001
 
-from .. import APP_NAME, AUTHOR, __version__
+from .. import APP_NAME, AUTHOR, __version__, updater
 from ..core.calc import DERIVED, derived
 from ..core.recorder import META_FIELDS, RESULT_FIELDS
 
@@ -22,6 +24,7 @@ class Bridge(QObject):
     """읽기 스레드 → 화면 스레드 전달."""
     data = Signal(float, dict, dict)
     status = Signal(bool, str)
+    update = Signal(object)
 
 
 class MainWindow(QMainWindow):
@@ -117,8 +120,56 @@ class MainWindow(QMainWindow):
         w = QWidget()
         w.setLayout(root)
         self.setCentralWidget(w)
+        menu = self.menuBar().addMenu("파일")
+        menu.addAction("지난 기록 열기…", self.open_history)
+        help_menu = self.menuBar().addMenu("도움말")
+        help_menu.addAction("프로그램 정보", lambda: QMessageBox.about(
+            self, APP_NAME, f"{APP_NAME} v{__version__}\n개발자 {AUTHOR}\n\nPLC 공정값 읽기 전용 기록기"))
+        self.history_windows = []
+        self.bridge.update.connect(self.on_update)
+
         self.sync_buttons()
         self.update_status()
+
+    # ---------- 지난 기록 / 업데이트 ----------
+    def open_history(self):
+        path, _ = QFileDialog.getOpenFileName(self, "지난 기록 열기", str(self.recorder.out_dir), "CSV (*.csv)")
+        if not path:
+            return
+        from .history import HistoryWindow
+        try:
+            w = HistoryWindow(Path(path))
+        except (OSError, ValueError) as e:
+            QMessageBox.warning(self, "열 수 없음", str(e))
+            return
+        self.history_windows.append(w)
+        w.show()
+
+    def check_update(self):
+        """exe 로 실행할 때만, 시작 시 한 번 백그라운드로 확인."""
+        updater.cleanup()
+        def run():
+            try:
+                self.bridge.update.emit(updater.check())
+            except Exception:
+                pass  # 인터넷이 없는 현장 PC 등 — 조용히 넘어간다
+        threading.Thread(target=run, daemon=True).start()
+
+    def on_update(self, found):
+        if not found or self.recorder.active:  # 기록 중에는 묻지 않는다
+            return
+        ver, exe_url, sha_url, notes = found
+        msg = f"새 버전 v{ver} 이 있습니다. 지금 설치할까요?\n\n{notes[:800]}"
+        if QMessageBox.question(self, "업데이트", msg) != QMessageBox.Yes:
+            return
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            updater.install(exe_url, sha_url)
+        except Exception as e:
+            QApplication.restoreOverrideCursor()
+            QMessageBox.warning(self, "업데이트 실패", str(e))
+            return
+        QApplication.quit()
 
     def sync_buttons(self):
         r = self.recorder
@@ -202,6 +253,8 @@ class MainWindow(QMainWindow):
             v = values.get(k)
             self.hist[k].append(float("nan") if v is None else v)
             lbl.setText("—" if v is None else (f"{v:.2e}" if k in ("vg1", "vg2") else f"{v:,.2f}"))
+            if k in raws:
+                lbl.setToolTip(f"PLC 원시값 {raws[k]}  (HMI 값과 비교해 배율 확인용)")
         self.sync_regions()
         self.sync_buttons()
         self.update_status()

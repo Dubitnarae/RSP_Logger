@@ -4,6 +4,7 @@ import argparse
 import sys
 import threading
 import tomllib
+from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
 
@@ -32,7 +33,7 @@ def main():
     tags = load_tags(CONFIG_DIR / "tags.csv")
     app = QApplication(sys.argv)
     ej = cfg["ejection"]
-    out_dir = cfg["record"]["dir"] or CONFIG_DIR.parent / ("data_dev" if a.dev else "data")
+    out_dir = Path(cfg["record"]["dir"]) if cfg["record"]["dir"] else CONFIG_DIR.parent / ("data_dev" if a.dev else "data")
     win = MainWindow(tags, f"{host}:{port}", cfg["process"]["wheel_diameter_mm"],
                      Recorder(out_dir, tags, DERIVED, cfg["poll"]["interval_s"], ej["pre_s"], ej["post_s"]),
                      dev=a.dev)
@@ -42,6 +43,8 @@ def main():
     win.poller = poller
     poller.start()
     win.show()
+    if getattr(sys, "frozen", False):
+        win.check_update()
     code = app.exec()
     poller.stop()
     return code
