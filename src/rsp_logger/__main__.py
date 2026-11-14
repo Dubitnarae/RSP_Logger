@@ -8,7 +8,9 @@ import tomllib
 from PySide6.QtWidgets import QApplication
 
 from . import CONFIG_DIR
+from .core.calc import DERIVED
 from .core.poller import Poller
+from .core.recorder import Recorder
 from .core.tags import load_tags
 from .ui.main_window import MainWindow
 from .xgt.client import XgtClient
@@ -29,7 +31,9 @@ def main():
 
     tags = load_tags(CONFIG_DIR / "tags.csv")
     app = QApplication(sys.argv)
-    win = MainWindow(tags, f"{host}:{port}", cfg["process"]["wheel_diameter_mm"], dev=a.dev)
+    out_dir = cfg["record"]["dir"] or CONFIG_DIR.parent / ("data_dev" if a.dev else "data")
+    win = MainWindow(tags, f"{host}:{port}", cfg["process"]["wheel_diameter_mm"],
+                     Recorder(out_dir, tags, DERIVED), dev=a.dev)
     poller = Poller(XgtClient(host, port, cfg["plc"]["timeout_s"]), tags, cfg["poll"]["interval_s"],
                     win.bridge.data.emit, win.bridge.status.emit)
     poller.start()

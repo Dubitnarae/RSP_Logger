@@ -14,3 +14,7 @@ interval_s = 1.0  # 0.1 미만 금지 (CLAUDE.md 규칙 4)
 [process]
 # TODO(확인필요): 휠 지름(mm) — 0이면 선속도를 계산하지 않고 "—" 표시
 wheel_diameter_mm = 0
+
+[record]
+# 저장 폴더. 비워 두면 프로젝트 폴더의 data (개발 모드는 data_dev)
+dir = ""
