@@ -1,0 +1,26 @@
+﻿key,이름,주소,타입,배율,오프셋,단위,확인필요,비고
+p_upper,상부 챔버 압력(PG1),D401,INT16,0.01,0,bar,Y,HMI 소수2자리 표시
+p_lower,하부 챔버 압력(PG2),D402,INT16,0.01,0,bar,Y,HMI 소수2자리 표시
+vg1_mant,진공도 VG1 가수,D3185,INT16,0.01,0,-,Y,D3190과 결합
+vg1_exp,진공도 VG1 지수,D3190,INT16,1,0,-,Y,
+vg2_mant,진공도 VG2 가수,D5185,INT16,0.01,0,-,Y,D5190과 결합
+vg2_exp,진공도 VG2 지수,D5190,INT16,1,0,-,Y,
+t_upper,상부챔버 분위기 온도,D201,INT16,0.1,0,℃,Y,
+t_lower,하부챔버 분위기 온도,D202,INT16,0.1,0,℃,Y,
+t_nozzle,노즐히터 온도,D203,INT16,0.1,0,℃,Y,
+t_wheel_out,구동 휠 출수온도,D204,INT16,0.1,0,℃,Y,
+t_melt,용탕 온도(파이로미터),D221,INT16,1,0,℃,Y,HMI 표시범위 750~2500
+sv_furnace,용해로 설정온도,D385,INT16,0.1,0,℃,Y,
+wheel_rpm,휠 구동 인버터 속도,D324,INT16,1,0,RPM,Y,
+inv_fb_rpm,챔버 전/후 인버터 속도,D304,INT16,0.1,0,RPM,Y,
+inv_lr_rpm,챔버 좌/우 인버터 속도,D314,INT16,0.1,0,RPM,Y,
+pos_fb,전/후 위치,D380,INT32,1,0,mm,Y,2워드
+pos_lr,좌/우 위치,D390,INT32,1,0,mm,Y,2워드
+gap_cand,노즐-휠 갭 후보,D440,INT16,0.01,0,mm,Y,갭인지 미확인
+hf_volt,고주파 DC 전압,D888,INT16,1,0,V,Y,
+hf_power,고주파 출력,D892,INT16,1,0,kW,Y,
+mfc_flow,MFC 가스 유량,D404,INT16,1,0,-,Y,
+mfc_sv,MFC 유량 설정,D425,INT16,1,0,-,Y,
+gas_press_bit,가스 가압(출탕 후보 신호),M118,BIT,1,0,-,Y,"HMI 램프 M118, 버튼 M11"
+rsp_remote,RSP 리모콘 사용중,M382,BIT,1,0,-,Y,용해로인버터_구동MR2
+furnace_inv_on,용해로 인버터 ON,P42,BIT,1,0,-,Y,
