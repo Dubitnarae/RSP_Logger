@@ -73,6 +73,9 @@ class MainWindow(QMainWindow):
         self.t_hist = deque(maxlen=HISTORY)
         self.hist = {k: deque(maxlen=HISTORY) for k in self.chk}
         self.curves = {}
+        self.regions = {}  # 출탕번호 -> 그래프 음영
+        self.poller = None  # __main__ 에서 연결 (Run 중 고속 읽기 전환용)
+        self.fast_interval = 0.2
 
         form = QFormLayout()
         self.meta = {}
@@ -85,11 +88,15 @@ class MainWindow(QMainWindow):
         self.btn_stop = QPushButton("■ 기록 정지")
         self.btn_start.clicked.connect(self.start_run)
         self.btn_stop.clicked.connect(self.stop_run)
-        self.btn_stop.setEnabled(False)
-        for b in (self.btn_start, self.btn_stop):
+        self.btn_ej_start = QPushButton("▲ 출탕 시작 (수동)")
+        self.btn_ej_end = QPushButton("▼ 출탕 종료")
+        self.btn_ej_start.clicked.connect(lambda: self.recorder.eject_start(self.last_ts or time.time()))
+        self.btn_ej_end.clicked.connect(lambda: self.recorder.eject_end(self.last_ts or time.time()))
+        for b in (self.btn_start, self.btn_stop, self.btn_ej_start, self.btn_ej_end):
             b.setMinimumHeight(36)
-        form.addRow(self.btn_start)
-        form.addRow(self.btn_stop)
+            form.addRow(b)
+        self.btn_ej_end.setStyleSheet("font-weight:bold;")
+        form.addRow(QLabel("출탕 시작: M151 자동 감지 / 종료: 버튼"))
         folder = QLabel(f"저장 폴더:\n{recorder.out_dir}")
         folder.setWordWrap(True)
         form.addRow(folder)
@@ -110,7 +117,17 @@ class MainWindow(QMainWindow):
         w = QWidget()
         w.setLayout(root)
         self.setCentralWidget(w)
+        self.sync_buttons()
         self.update_status()
+
+    def sync_buttons(self):
+        r = self.recorder
+        for e in self.meta.values():
+            e.setEnabled(not r.active)
+        self.btn_start.setEnabled(not r.active)
+        self.btn_stop.setEnabled(r.active)
+        self.btn_ej_start.setEnabled(r.active and not r.ejecting)
+        self.btn_ej_end.setEnabled(r.ejecting)
 
     def on_status(self, ok, msg):
         if self.connected and not ok and self.recorder.active:
@@ -126,25 +143,30 @@ class MainWindow(QMainWindow):
             return self.wheel_d_mm
 
     def start_run(self):
+        if not self.meta["시료명"].text().strip():
+            QMessageBox.information(self, "시료명 필요", "시료명을 입력해야 기록을 시작할 수 있습니다.")
+            self.meta["시료명"].setFocus()
+            return
         try:
             path = self.recorder.start(time.time(), {k: e.text() for k, e in self.meta.items()})
         except OSError as e:
             QMessageBox.warning(self, "기록 시작 실패", str(e))
             return
-        for e in self.meta.values():
-            e.setEnabled(False)
-        self.btn_start.setEnabled(False)
-        self.btn_stop.setEnabled(True)
+        for reg in self.regions.values():
+            self.plot.removeItem(reg)
+        self.regions.clear()
+        if self.poller:
+            self.poller.set_interval(self.fast_interval)
+        self.sync_buttons()
         self.statusBar().showMessage(f"기록 중: {path.name}")
         self.update_status()
 
     def stop_run(self, ask=True):
         results = ResultDialog.ask(self) if ask else {}
         path = self.recorder.stop(time.time(), results)
-        for e in self.meta.values():
-            e.setEnabled(True)
-        self.btn_start.setEnabled(True)
-        self.btn_stop.setEnabled(False)
+        if self.poller:
+            self.poller.set_interval(self.poller.base_interval)
+        self.sync_buttons()
         if path:
             self.statusBar().showMessage(f"저장됨: {path}")
         self.update_status()
@@ -157,12 +179,17 @@ class MainWindow(QMainWindow):
     def update_status(self):
         dot = "🟢" if self.connected else "🔴"
         r = self.recorder
-        rec = f"🔴 기록 중 {self.last_ts - r.t0:.0f}초 ({r.rows}행)" if r.active else "대기(모니터링만)"
+        rec = f"🔴 기록 중 {self.last_ts - r.t0:.0f}초" if r.active else "대기(모니터링만)"
+        if r.ejecting:
+            e = r.ejections[-1]
+            rec += f"   |   🟧 출탕 {e['no']} 진행 중 {self.last_ts - e['start']:.1f}초"
+        elif r.active:
+            rec += f"   |   출탕 {len(r.ejections)}회"
         def bit(k):
             return "—" if k not in self.last else ("ON" if self.last[k] else "OFF")
         self.status_lbl.setText(
             f"{dot} {self.conn_msg}   |   PLC {self.host}   |   RSP 리모콘(M382): {bit('rsp_remote')}"
-            f"   |   가스 가압(M118): {bit('gas_press_bit')}   |   기록: {rec}")
+            f"   |   스토퍼 상승(M151): {bit('stopper_up')}   |   기록: {rec}")
 
     def on_data(self, ts, values, raws):
         values = {**values, **derived(values, self.wheel_d())}
@@ -175,8 +202,22 @@ class MainWindow(QMainWindow):
             v = values.get(k)
             self.hist[k].append(float("nan") if v is None else v)
             lbl.setText("—" if v is None else (f"{v:.2e}" if k in ("vg1", "vg2") else f"{v:,.2f}"))
+        self.sync_regions()
+        self.sync_buttons()
         self.update_status()
         self.redraw()
+
+    def sync_regions(self):
+        """출탕 구간을 그래프에 주황 음영으로 표시."""
+        for e in self.recorder.ejections:
+            x0 = e["start"] - self.t_start
+            x1 = (e["end"] or self.last_ts) - self.t_start
+            reg = self.regions.get(e["no"])
+            if reg is None:
+                reg = pg.LinearRegionItem((x0, x1), movable=False, brush=pg.mkBrush(255, 165, 0, 50))
+                self.plot.addItem(reg)
+                self.regions[e["no"]] = reg
+            reg.setRegion((x0, x1))
 
     def redraw(self):
         for k, cb in self.chk.items():

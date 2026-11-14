@@ -24,3 +24,4 @@ mfc_sv,MFC 유량 설정,D425,INT16,1,0,-,Y,
 gas_press_bit,가스 가압(출탕 후보 신호),M118,BIT,1,0,-,Y,"HMI 램프 M118, 버튼 M11"
 rsp_remote,RSP 리모콘 사용중,M382,BIT,1,0,-,Y,용해로인버터_구동MR2
 furnace_inv_on,용해로 인버터 ON,P42,BIT,1,0,-,Y,
+stopper_up,스토퍼 상승램프(출탕 시작 신호),M151,BIT,1,0,-,Y,0→1 상승 = 출탕 자동 시작

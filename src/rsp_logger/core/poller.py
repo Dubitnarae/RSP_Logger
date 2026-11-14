@@ -13,10 +13,13 @@ class Poller(threading.Thread):
     def __init__(self, client, tags, interval, on_data, on_status):
         super().__init__(daemon=True)
         self.client, self.tags = client, tags
-        self.interval = max(MIN_INTERVAL, interval)
+        self.base_interval = self.interval = max(MIN_INTERVAL, interval)
         self.on_data, self.on_status = on_data, on_status
         self.blocks = plan_blocks(tags)
         self._stop = threading.Event()
+
+    def set_interval(self, s):
+        self.interval = max(MIN_INTERVAL, s)
 
     def stop(self):
         self._stop.set()

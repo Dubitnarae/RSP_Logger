@@ -31,11 +31,15 @@ def main():
 
     tags = load_tags(CONFIG_DIR / "tags.csv")
     app = QApplication(sys.argv)
+    ej = cfg["ejection"]
     out_dir = cfg["record"]["dir"] or CONFIG_DIR.parent / ("data_dev" if a.dev else "data")
     win = MainWindow(tags, f"{host}:{port}", cfg["process"]["wheel_diameter_mm"],
-                     Recorder(out_dir, tags, DERIVED), dev=a.dev)
+                     Recorder(out_dir, tags, DERIVED, cfg["poll"]["interval_s"], ej["pre_s"], ej["post_s"]),
+                     dev=a.dev)
+    win.fast_interval = ej["fast_interval_s"]
     poller = Poller(XgtClient(host, port, cfg["plc"]["timeout_s"]), tags, cfg["poll"]["interval_s"],
                     win.bridge.data.emit, win.bridge.status.emit)
+    win.poller = poller
     poller.start()
     win.show()
     code = app.exec()

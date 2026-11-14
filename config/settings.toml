@@ -18,3 +18,8 @@ wheel_diameter_mm = 0
 [record]
 # 저장 폴더. 비워 두면 프로젝트 폴더의 data (개발 모드는 data_dev)
 dir = ""
+
+[ejection]
+pre_s = 10            # 출탕 시작 전 함께 저장할 시간
+post_s = 30           # 출탕 종료 후 함께 저장할 시간
+fast_interval_s = 0.2 # Run 기록 중 읽기 간격 (0.1 미만 금지)

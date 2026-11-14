@@ -93,6 +93,7 @@ class FakePlc(socketserver.ThreadingTCPServer):
                 self.set_word("D888", int(400 + n(3)))
                 self.set_word("D892", int(15 + n(1)))
                 self.set_bit("M118", ej)
+                self.set_bit("M151", ej)
                 self.set_bit("M382", True)
                 time.sleep(0.2)
         threading.Thread(target=loop, daemon=True).start()
