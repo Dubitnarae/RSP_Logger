@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 APP_NAME = "RSP Logger"
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 AUTHOR = "KIM YEONGDO"
 GITHUB_REPO = "Dubitnarae/RSP_Logger"  # 자동 업데이트가 릴리스를 확인하는 저장소(공개여야 함)
 
