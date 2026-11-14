@@ -83,3 +83,26 @@ def decode(tags, blocks, results):
             values[t.key] = raw * t.scale + t.offset
         raws[t.key] = raw
     return values, raws
+
+
+def suggest_scale(raw, hmi, offset=0.0):
+    """HMI 표시값과 PLC 원시값으로 배율 계산 (HMI = 원시값 × 배율 + 오프셋). 원시값 0이면 계산 불가 -> None"""
+    return None if raw == 0 else float(f"{(hmi - offset) / raw:.6g}")
+
+
+def save_tags_csv(path, header, rows):
+    """rows(list of dict)를 tags.csv 로 저장. 먼저 임시 파일로 써서 load_tags 로 검사한 뒤 바꿔 끼운다 —
+    잘못된 주소·타입·숫자가 있으면 ValueError 를 내고 원래 파일은 그대로 둔다."""
+    from pathlib import Path
+    path = Path(path)
+    tmp = path.with_suffix(".tmp")
+    with open(tmp, "w", encoding="utf-8-sig", newline="") as f:
+        w = csv.DictWriter(f, header)
+        w.writeheader()
+        w.writerows(rows)
+    try:
+        load_tags(tmp)
+    except Exception as e:
+        tmp.unlink(missing_ok=True)
+        raise ValueError(f"저장 안 함 — 잘못된 값: {e}") from e
+    tmp.replace(path)

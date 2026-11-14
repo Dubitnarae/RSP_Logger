@@ -8,7 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from rsp_logger import CONFIG_DIR  # noqa: E402
 from rsp_logger.core.calc import derived  # noqa: E402
 from rsp_logger.core.poller import Poller  # noqa: E402
-from rsp_logger.core.tags import decode, load_tags, plan_blocks  # noqa: E402
+from rsp_logger.core.tags import decode, load_tags, plan_blocks, save_tags_csv, suggest_scale  # noqa: E402
 from rsp_logger.sim.fake_plc import FakePlc  # noqa: E402
 from rsp_logger.xgt.client import XgtClient  # noqa: E402
 
@@ -16,6 +16,30 @@ from rsp_logger.xgt.client import XgtClient  # noqa: E402
 class TagsTest(unittest.TestCase):
     def setUp(self):
         self.tags = load_tags(CONFIG_DIR / "tags.csv")
+
+    def test_suggest_scale(self):
+        self.assertEqual(suggest_scale(25, 0.25), 0.01)
+        self.assertEqual(suggest_scale(-15, -0.15), 0.01)
+        self.assertEqual(suggest_scale(500, 30, offset=-20), 0.1)
+        self.assertIsNone(suggest_scale(0, 1.0))
+
+    def test_save_tags_csv(self):
+        import csv
+        import tempfile
+        src = CONFIG_DIR / "tags.csv"
+        with open(src, encoding="utf-8-sig", newline="") as f:
+            r = csv.DictReader(f)
+            header, rows = r.fieldnames, list(r)
+        path = Path(tempfile.mkdtemp()) / "tags.csv"
+        rows[0]["배율"] = "0.1"
+        save_tags_csv(path, header, rows)
+        self.assertEqual(load_tags(path)[0].scale, 0.1)
+        before = path.read_bytes()
+        rows[0]["배율"] = "abc"
+        with self.assertRaises(ValueError):
+            save_tags_csv(path, header, rows)
+        self.assertEqual(path.read_bytes(), before)  # 실패하면 원래 파일 유지
+        self.assertFalse(path.with_suffix(".tmp").exists())
 
     def test_blocks_cover_all(self):
         blocks = plan_blocks(self.tags)

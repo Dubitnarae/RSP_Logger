@@ -11,9 +11,10 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QDialog, QDialogButtonBo
                                QPushButton, QScrollArea, QVBoxLayout, QWidget)
 import pyqtgraph as pg  # noqa: E402,I001
 
-from .. import APP_NAME, AUTHOR, __version__, updater
+from .. import APP_NAME, AUTHOR, CONFIG_DIR, __version__, updater
 from ..core.calc import DERIVED, derived
 from ..core.recorder import META_FIELDS, RESULT_FIELDS
+from .tag_editor import TagEditor
 
 HISTORY = 3600  # 그래프에 남기는 점 수
 DEFAULT_PLOT = {"p_upper", "p_lower", "dp"}
@@ -33,7 +34,8 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"{APP_NAME} v{__version__}{'  [개발 모드: 가상 PLC]' if dev else ''}")
         self.resize(1200, 720)
         self.host, self.wheel_d_mm, self.recorder, self.dev = host, wheel_d_mm, recorder, dev
-        self.restart_dev = None  # 모드 전환 시 True/False
+        self.restart_dev = None  # 다시 시작할 때 True(개발)/False(현장)
+        self.tag_editor = None
         self.bridge = Bridge()
         self.bridge.data.connect(self.on_data)
         self.bridge.status.connect(self.on_status)
@@ -123,6 +125,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(w)
         menu = self.menuBar().addMenu("파일")
         menu.addAction("지난 기록 열기…", self.open_history)
+        menu.addAction("태그 설정 · 환산 확인…", self.open_tag_editor)
         menu.addSeparator()
         menu.addAction("현장 모드로 다시 시작" if dev else "개발 모드(가상 PLC)로 다시 시작", self.switch_mode)
         help_menu = self.menuBar().addMenu("도움말")
@@ -226,15 +229,24 @@ class MainWindow(QMainWindow):
         self.update_status()
 
     def switch_mode(self):
-        """다른 모드로 다시 시작. 실제 재시작은 창이 닫힌 뒤 __main__ 이 한다."""
         target = "현장 모드" if self.dev else "개발 모드(가상 PLC)"
-        msg = f"{target}로 다시 시작합니다."
+        self.restart(not self.dev, "모드 전환", f"{target}로 다시 시작합니다.")
+
+    def restart(self, dev, title, msg):
+        """실제 재시작은 창이 닫힌 뒤 __main__ 이 한다."""
         if self.recorder.active:
             msg += "\n지금 기록 중인 Run은 정지·저장됩니다."
-        if QMessageBox.question(self, "모드 전환", msg) != QMessageBox.Yes:
+        if QMessageBox.question(self, title, msg) != QMessageBox.Yes:
             return
-        self.restart_dev = not self.dev
+        self.restart_dev = dev
         self.close()
+
+    def open_tag_editor(self):
+        if self.tag_editor is None:
+            self.tag_editor = TagEditor(self, CONFIG_DIR / "tags.csv", lambda: self.restart(
+                self.dev, "태그 저장됨", "tags.csv 를 저장했습니다. 다시 시작해야 반영됩니다. 지금 다시 시작할까요?"))
+        self.tag_editor.show()
+        self.tag_editor.raise_()
 
     def closeEvent(self, e):
         if self.recorder.active:
@@ -260,6 +272,8 @@ class MainWindow(QMainWindow):
         values = {**values, **derived(values, self.wheel_d())}
         self.last, self.last_ts = values, ts
         self.recorder.add(ts, values, raws)
+        if self.tag_editor and self.tag_editor.isVisible():
+            self.tag_editor.set_raws(raws)
         if self.t_start is None:
             self.t_start = ts
         self.t_hist.append(ts - self.t_start)
