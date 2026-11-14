@@ -33,6 +33,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"{APP_NAME} v{__version__}{'  [개발 모드: 가상 PLC]' if dev else ''}")
         self.resize(1200, 720)
         self.host, self.wheel_d_mm, self.recorder, self.dev = host, wheel_d_mm, recorder, dev
+        self.restart_dev = None  # 모드 전환 시 True/False
         self.bridge = Bridge()
         self.bridge.data.connect(self.on_data)
         self.bridge.status.connect(self.on_status)
@@ -122,6 +123,8 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(w)
         menu = self.menuBar().addMenu("파일")
         menu.addAction("지난 기록 열기…", self.open_history)
+        menu.addSeparator()
+        menu.addAction("현장 모드로 다시 시작" if dev else "개발 모드(가상 PLC)로 다시 시작", self.switch_mode)
         help_menu = self.menuBar().addMenu("도움말")
         help_menu.addAction("프로그램 정보", lambda: QMessageBox.about(
             self, APP_NAME, f"{APP_NAME} v{__version__}\n개발자 {AUTHOR}\n\nPLC 공정값 읽기 전용 기록기"))
@@ -221,6 +224,17 @@ class MainWindow(QMainWindow):
         if path:
             self.statusBar().showMessage(f"저장됨: {path}")
         self.update_status()
+
+    def switch_mode(self):
+        """다른 모드로 다시 시작. 실제 재시작은 창이 닫힌 뒤 __main__ 이 한다."""
+        target = "현장 모드" if self.dev else "개발 모드(가상 PLC)"
+        msg = f"{target}로 다시 시작합니다."
+        if self.recorder.active:
+            msg += "\n지금 기록 중인 Run은 정지·저장됩니다."
+        if QMessageBox.question(self, "모드 전환", msg) != QMessageBox.Yes:
+            return
+        self.restart_dev = not self.dev
+        self.close()
 
     def closeEvent(self, e):
         if self.recorder.active:

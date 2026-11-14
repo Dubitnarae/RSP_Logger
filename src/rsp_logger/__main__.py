@@ -1,6 +1,8 @@
 """실행: python -m rsp_logger          (현장 PLC, config/settings.toml)
       python -m rsp_logger --dev    (개발 모드: 값이 움직이는 가상 PLC를 함께 띄움)"""
 import argparse
+import os
+import subprocess
 import sys
 import threading
 import tomllib
@@ -47,7 +49,19 @@ def main():
         win.check_update()
     code = app.exec()
     poller.stop()
+    if win.restart_dev is not None:
+        restart(win.restart_dev)
     return code
+
+
+def restart(dev):
+    args = ["--dev"] if dev else []
+    if getattr(sys, "frozen", False):
+        # 새 exe 가 지금 exe 의 임시 폴더(_MEI…)를 물려받지 않게 (updater.py 와 같은 이유)
+        env = dict(os.environ, PYINSTALLER_RESET_ENVIRONMENT="1")
+        subprocess.Popen([sys.executable, *args], cwd=str(Path(sys.executable).parent), close_fds=True, env=env)
+    else:
+        subprocess.Popen([sys.executable, "-m", "rsp_logger", *args], cwd=str(Path(__file__).parents[1]), close_fds=True)
 
 
 if __name__ == "__main__":
