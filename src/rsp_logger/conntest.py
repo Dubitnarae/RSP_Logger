@@ -5,11 +5,10 @@
 """
 import argparse
 import tomllib
-from pathlib import Path
-
+from . import CONFIG_DIR
 from .xgt.client import XgtClient
 
-SETTINGS = Path(__file__).resolve().parents[2] / "config" / "settings.toml"
+SETTINGS = CONFIG_DIR / "settings.toml"
 DEFAULT_ADDRS = ["D401", "D402", "D324", "D221", "M382"]
 
 

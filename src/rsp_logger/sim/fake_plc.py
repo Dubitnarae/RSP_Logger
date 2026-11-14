@@ -2,9 +2,13 @@
 
 실행: python -m rsp_logger.sim.fake_plc  (127.0.0.1:2004)
 """
+import math
+import random
 import re
 import socketserver
 import struct
+import threading
+import time
 from collections import defaultdict
 
 from ..xgt import protocol as p
@@ -65,14 +69,38 @@ class FakePlc(socketserver.ThreadingTCPServer):
         return struct.pack("<HHHHHH", p.CMD_READ_RESP, dtype, 0, 0, 1, n) + data
 
 
+    def start_animation(self, cycle=30.0, eject_s=5.0):
+        """개발 모드용: 공정처럼 움직이는 원시값. cycle초마다 eject_s초 동안 출탕(M118 ON, 상부 압력 상승)."""
+        def loop():
+            t0 = time.monotonic()
+            while True:
+                t = time.monotonic() - t0
+                ej = (t % cycle) > cycle - eject_s
+                n = lambda a: random.uniform(-a, a)  # noqa: E731
+                self.set_word("D401", int((50 if ej else 20) + n(1)))
+                self.set_word("D402", int(n(1)))
+                self.set_word("D3185", int(350 + n(5)))
+                self.set_word("D3190", -3)
+                self.set_word("D5185", int(120 + n(3)))
+                self.set_word("D5190", -2)
+                self.set_word("D201", int(250 + n(2)))
+                self.set_word("D202", int(240 + n(2)))
+                self.set_word("D203", int(8000 + n(20)))
+                self.set_word("D204", int((300 if ej else 220) + n(3)))
+                self.set_word("D221", int(1400 + 20 * math.sin(t / 10) + n(2)))
+                self.set_word("D385", 14000)
+                self.set_word("D324", int(1500 + n(5)))
+                self.set_word("D888", int(400 + n(3)))
+                self.set_word("D892", int(15 + n(1)))
+                self.set_bit("M118", ej)
+                self.set_bit("M382", True)
+                time.sleep(0.2)
+        threading.Thread(target=loop, daemon=True).start()
+
+
 if __name__ == "__main__":
     plc = FakePlc()
-    # 예시값 (원시값, 환산 전)
-    plc.set_word("D401", 25)
-    plc.set_word("D402", (-15) & 0xFFFF)
-    plc.set_word("D324", 1200)
-    plc.set_word("D221", 1450)
-    plc.set_bit("M382", True)
+    plc.start_animation()
     print("가상 PLC 실행 중: 127.0.0.1:2004 (Ctrl+C로 종료)")
     try:
         plc.serve_forever()
