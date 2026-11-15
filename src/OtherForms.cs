@@ -1,0 +1,256 @@
+// 지난 기록 보기 · 태그 설정/환산 확인 화면
+
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Windows.Forms;
+using System.Windows.Forms.DataVisualization.Charting;
+
+namespace RspLogger
+{
+    // 지난 기록 보기 — 저장한 Run CSV를 열어 그래프로 다시 본다 (출탕 구간 음영·이벤트 선 포함)
+    class HistoryForm : Form
+    {
+        static readonly HashSet<string> Skip = new HashSet<string> { "시각", "경과초", "출탕구간번호", "이벤트" };
+        static readonly string[] Default = { "상부 챔버 압력", "하부 챔버 압력", "분사 차압" };
+
+        readonly Chart chart = Ui.NewChart();
+        readonly CheckedListBox list = new CheckedListBox { Dock = DockStyle.Left, Width = 300, CheckOnClick = true, IntegralHeight = false };
+        readonly List<double> x;
+        readonly Dictionary<string, List<double>> cols = new Dictionary<string, List<double>>();
+        readonly Dictionary<string, Series> curves = new Dictionary<string, Series>();
+
+        // -> 메타 [(키, 값)], 열 이름 목록, 행 목록
+        public static void LoadRun(string path, out List<KeyValuePair<string, string>> meta, out string[] hdr,
+            out List<Dictionary<string, string>> data)
+        {
+            var rows = Csv.Read(path);
+            int hi = rows.FindIndex(r => r.Length > 0 && r[0] == "시각");
+            if (hi < 0) throw new FormatException("RSP Logger 기록 파일이 아닙니다 ('시각' 머리줄 없음).");
+            meta = rows.Where(r => r.Length == 2 && r[0].StartsWith("#") && r[1] != "")
+                .Select(r => new KeyValuePair<string, string>(r[0].Substring(1).Trim(), r[1])).ToList();
+            var h = hdr = rows[hi];
+            data = rows.Skip(hi + 1).Where(r => r.Length > 0 && !r[0].StartsWith("#"))
+                .Select(r => { var d = new Dictionary<string, string>(); for (int i = 0; i < h.Length && i < r.Length; i++) d[h[i]] = r[i]; return d; })
+                .ToList();
+        }
+
+        static double F(Dictionary<string, string> r, string k)
+        {
+            string s;
+            double v;
+            return r.TryGetValue(k, out s) && double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out v) ? v : double.NaN;
+        }
+
+        static string G(Dictionary<string, string> r, string k)
+        {
+            string s;
+            return r.TryGetValue(k, out s) ? s : "";
+        }
+
+        public HistoryForm(string path)
+        {
+            List<KeyValuePair<string, string>> meta;
+            string[] hdr;
+            List<Dictionary<string, string>> data;
+            LoadRun(path, out meta, out hdr, out data);
+            Text = "지난 기록 — " + Path.GetFileName(path);
+            Font = Ui.Font;
+            Size = new Size(1150, 700);
+            var samples = data.Where(r => G(r, "이벤트") == "").ToList();
+            x = samples.Select(r => F(r, "경과초")).ToList();
+            foreach (var c in hdr.Where(c => !Skip.Contains(c)))
+                cols[c] = samples.Select(r => F(r, c)).ToList();
+
+            var axis = chart.ChartAreas[0].AxisX;
+            // 출탕 구간 음영
+            foreach (var g in samples.Where(r => G(r, "출탕구간번호") != "").GroupBy(r => G(r, "출탕구간번호")))
+            {
+                double a = g.Min(r => F(r, "경과초")), b = g.Max(r => F(r, "경과초"));
+                axis.StripLines.Add(new StripLine { IntervalOffset = a, StripWidth = Math.Max(0.01, b - a), BackColor = Ui.EjectShade, Interval = 0 });
+            }
+            // 이벤트 세로선
+            foreach (var r in data.Where(r => G(r, "이벤트") != ""))
+                axis.StripLines.Add(new StripLine
+                {
+                    IntervalOffset = F(r, "경과초"), StripWidth = 0, Interval = 0, BorderColor = Color.Gray, BorderWidth = 1,
+                    Text = G(r, "이벤트"), ForeColor = Color.DimGray, TextAlignment = StringAlignment.Far, TextOrientation = TextOrientation.Rotated270,
+                });
+
+            foreach (var kv in cols)
+            {
+                if (kv.Value.All(double.IsNaN)) continue;   // 값이 하나도 없는 열은 뺀다
+                list.Items.Add(kv.Key, Default.Any(d => kv.Key.StartsWith(d)));
+            }
+            list.ItemCheck += (s, e) => BeginInvoke((Action)Redraw);   // ItemCheck 는 바뀌기 전에 불린다
+
+            var info = new Label
+            {
+                Text = meta.Count > 0 ? string.Join("   ", meta.Select(m => m.Key + ": " + m.Value)) : "(메타데이터 없음)",
+                Dock = DockStyle.Top, AutoSize = true, MaximumSize = new Size(1100, 0), Padding = new Padding(6),
+            };
+            Controls.Add(chart);
+            Controls.Add(list);
+            Controls.Add(info);
+            Redraw();
+        }
+
+        void Redraw()
+        {
+            for (int i = 0; i < list.Items.Count; i++)
+            {
+                string c = (string)list.Items[i];
+                Series s;
+                if (list.GetItemChecked(i) && !curves.ContainsKey(c))
+                {
+                    s = new Series(c) { ChartType = SeriesChartType.FastLine, BorderWidth = 2, Color = Ui.Colors[curves.Count % Ui.Colors.Length] };
+                    Ui.SetPoints(s, x, cols[c]);
+                    chart.Series.Add(s);
+                    curves[c] = s;
+                }
+                else if (!list.GetItemChecked(i) && curves.TryGetValue(c, out s))
+                {
+                    chart.Series.Remove(s);
+                    curves.Remove(c);
+                }
+            }
+        }
+    }
+
+    // 태그 설정·환산 확인 (SPEC 9장). tags.csv 를 표로 고치고, HMI 표시값을 넣으면 배율을 제안한다.
+    // 저장하면 다시 시작해야 반영된다 (읽기 묶음이 시작 때 정해지므로).
+    class TagEditorForm : Form
+    {
+        static readonly string[] Live = { "PLC 원시값", "환산값(표 배율)", "HMI 값 입력" };
+        readonly string path;
+        readonly Action onSaved;
+        readonly string[] header;
+        readonly Dictionary<string, int> col;
+        readonly int cRaw, cVal, cHmi;
+        readonly DataGridView t = new DataGridView
+        {
+            Dock = DockStyle.Fill, AllowUserToAddRows = false, AllowUserToDeleteRows = false, RowHeadersVisible = false,
+            AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.AllCells, SelectionMode = DataGridViewSelectionMode.CellSelect,
+        };
+        Dictionary<string, long> raws = new Dictionary<string, long>();
+
+        public TagEditorForm(string path, Action onSaved)
+        {
+            this.path = path; this.onSaved = onSaved;
+            Text = "태그 설정 · 환산 확인";
+            Font = Ui.Font;
+            Size = new Size(1300, 720);
+            var rows = Csv.Read(path);
+            header = rows[0];
+            col = header.Select((h, i) => new { h, i }).ToDictionary(p => p.h, p => p.i);
+            int n = header.Length;
+            cRaw = n; cVal = n + 1; cHmi = n + 2;
+            foreach (var h in header.Concat(Live)) t.Columns.Add(h, h);
+            foreach (DataGridViewColumn c in t.Columns) c.SortMode = DataGridViewColumnSortMode.NotSortable;
+            t.Columns[col["key"]].ReadOnly = true;   // key 는 기록 파일 열 이름이라 못 바꾼다
+            foreach (int j in new[] { cRaw, cVal })
+            {
+                t.Columns[j].ReadOnly = true;
+                t.Columns[j].DefaultCellStyle.BackColor = Color.FromArgb(240, 240, 240);
+            }
+            foreach (var r in rows.Skip(1))
+            {
+                var cells = new object[n + Live.Length];
+                for (int j = 0; j < n; j++) cells[j] = j < r.Length ? r[j] : "";
+                cells[cRaw] = cells[cVal] = "—";
+                cells[cHmi] = "";
+                t.Rows.Add(cells);
+            }
+
+            var guide = new Label
+            {
+                Text = "① 현장 HMI 화면의 값을 'HMI 값 입력' 칸에 적는다  ② [배율 제안]을 누르면 배율 칸이 (HMI−오프셋)÷원시값으로 바뀐다"
+                    + "  ③ 맞으면 '확인필요'를 N 으로  ④ [저장 후 다시 시작]. 원시값은 1초마다 새로 읽힌다.",
+                Dock = DockStyle.Top, AutoSize = true, MaximumSize = new Size(1250, 0), Padding = new Padding(6),
+            };
+            var bSuggest = new Button { Text = "배율 제안 (HMI 값 넣은 줄만)", AutoSize = true };
+            bSuggest.Click += (s, e) => Suggest();
+            var bSave = new Button { Text = "저장 후 다시 시작", AutoSize = true };
+            bSave.Click += (s, e) => Save();
+            var bClose = new Button { Text = "닫기 (저장 안 함)", AutoSize = true };
+            bClose.Click += (s, e) => Hide();
+            var btns = new FlowLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, Padding = new Padding(4) };
+            btns.Controls.AddRange(new Control[] { bSuggest, bSave, bClose });
+            Controls.Add(t);
+            Controls.Add(guide);
+            Controls.Add(btns);
+        }
+
+        // 사용자가 닫으면 숨기기만 한다 (고친 값 유지)
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            if (e.CloseReason == CloseReason.UserClosing) { e.Cancel = true; Hide(); }
+            base.OnFormClosing(e);
+        }
+
+        string Cell(int i, int j) { return Convert.ToString(t.Rows[i].Cells[j].Value ?? "").Trim(); }
+
+        double Num(int i, string h) { return double.Parse(Cell(i, col[h]), NumberStyles.Float, CultureInfo.InvariantCulture); }
+
+        // 메인 창이 새 값을 읽을 때마다 부른다
+        public void SetRaws(Dictionary<string, long> raws)
+        {
+            this.raws = raws;
+            for (int i = 0; i < t.Rows.Count; i++)
+            {
+                long raw;
+                bool has = raws.TryGetValue(Cell(i, col["key"]), out raw);
+                t.Rows[i].Cells[cRaw].Value = has ? raw.ToString(CultureInfo.InvariantCulture) : "—";
+                string val;
+                try { val = has ? (raw * Num(i, "배율") + Num(i, "오프셋")).ToString("G6", CultureInfo.InvariantCulture) : "—"; }
+                catch (FormatException) { val = "배율/오프셋 숫자 아님"; }
+                t.Rows[i].Cells[cVal].Value = val;
+            }
+        }
+
+        void Suggest()
+        {
+            t.EndEdit();
+            int done = 0;
+            var skipped = new List<string>();
+            for (int i = 0; i < t.Rows.Count; i++)
+            {
+                string key = Cell(i, col["key"]), hmi = Cell(i, cHmi);
+                if (hmi == "") continue;
+                double? s = null;
+                long raw;
+                double h;
+                try
+                {
+                    if (raws.TryGetValue(key, out raw) && double.TryParse(hmi, NumberStyles.Float, CultureInfo.InvariantCulture, out h))
+                        s = Tags.SuggestScale(raw, h, Num(i, "오프셋"));
+                }
+                catch (FormatException) { }
+                if (s == null) { skipped.Add(key); continue; }   // 원시값 없음·0, 숫자 아님
+                t.Rows[i].Cells[col["배율"]].Value = s.Value.ToString("R", CultureInfo.InvariantCulture);
+                done++;
+            }
+            SetRaws(raws);
+            string msg = done + "줄 배율을 바꿨습니다.";
+            if (skipped.Count > 0) msg += "\n계산 못 한 줄(원시값 0·없음 또는 숫자 아님): " + string.Join(", ", skipped);
+            MessageBox.Show(this, msg, "배율 제안");
+        }
+
+        void Save()
+        {
+            t.EndEdit();
+            var rows = Enumerable.Range(0, t.Rows.Count).Select(i => header.Select((h, j) => Cell(i, j)).ToArray()).ToList();
+            try { Tags.Save(path, header, rows); }
+            catch (Exception e)
+            {
+                MessageBox.Show(this, e.Message, "저장 안 됨", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            Hide();
+            onSaved();
+        }
+    }
+}

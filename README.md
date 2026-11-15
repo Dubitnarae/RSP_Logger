@@ -32,11 +32,12 @@ PLC 없이 화면을 보려면 개발 모드로 실행합니다: `RSP_Logger.exe
 
 출탕 구간 [시작 − 10초, 종료 + 30초]는 0.2초 간격, 그 밖은 1초 간격으로 저장합니다 (`settings.toml`의 `[ejection]`).
 
+연결 테스트: `RSP_Logger.exe --conntest --host 192.168.1.2 D401 M382` (주소 몇 개만 읽어 원시값을 창으로 보여 줌).
+
 ## 개발
+C# WinForms (.NET Framework 4.x). Windows에 들어 있는 C# 컴파일러로 빌드하므로 따로 설치할 것이 없습니다.
 ```
-pip install PySide6 pyqtgraph pyinstaller
-python -m unittest discover -s tests      # 테스트
-cd src; python -m rsp_logger --dev         # 개발 모드 실행
-cd src; python -m rsp_logger.conntest --host 192.168.1.2 D401 M382   # 연결 테스트(콘솔)
-.\build.ps1                                # exe 빌드 -> dist\RSP_Logger.exe
+.\build.ps1                       # 빌드 + 자체 시험 -> dist\RSP_Logger.exe (시험 결과 selftest_out.txt)
+dist\RSP_Logger.exe --dev         # 개발 모드 실행
 ```
+v0.2.0까지는 Python(PySide6) 판이었습니다. 설정 파일·기록 파일 형식은 같습니다.
