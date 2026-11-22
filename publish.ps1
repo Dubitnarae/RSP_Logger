@@ -15,3 +15,4 @@ $nf = New-TemporaryFile; [IO.File]::WriteAllText($nf, $notes)  # BOM 없이
 git tag -f "v$ver"; git push -f origin "v$ver"
 gh release create "v$ver" dist\RSP_Logger.exe dist\RSP_Logger.exe.sha256 --title "RSP Logger v$ver" --notes-file $nf
 Remove-Item $nf
+& .\verify_release.ps1 -Repo Dubitnarae/RSP_Logger -Tag "v$ver" -Files dist\RSP_Logger.exe, dist\RSP_Logger.exe.sha256
