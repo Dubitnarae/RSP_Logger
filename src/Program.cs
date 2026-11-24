@@ -17,8 +17,8 @@ using System.Windows.Forms;
 [assembly: System.Reflection.AssemblyProduct("RSP Logger")]
 [assembly: System.Reflection.AssemblyCompany("KIM YEONGDO")]
 [assembly: System.Reflection.AssemblyCopyright("Copyright (c) 2026 KIM YEONGDO")]
-[assembly: System.Reflection.AssemblyVersion("0.3.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("0.3.0.0")]
+[assembly: System.Reflection.AssemblyVersion("0.3.1.0")]
+[assembly: System.Reflection.AssemblyFileVersion("0.3.1.0")]
 
 namespace RspLogger
 {
@@ -239,6 +239,7 @@ namespace RspLogger
                 host = host ?? cfg.Str("plc.host");
                 if (port == 0) port = (int)cfg.Num("plc.port");
                 c = new XgtClient(host, port, cfg.Num("plc.timeout_s"));
+                sb.AppendLine("이 PC 주소: " + string.Join(", ", NetCheck.LocalAddrs()));
                 sb.AppendLine("접속 시도: " + host + ":" + port);
                 c.Connect();
                 foreach (var a in addrs)
@@ -259,6 +260,8 @@ namespace RspLogger
             catch (Exception e)
             {
                 sb.AppendLine("접속 실패: " + e.Message);
+                string hint = NetCheck.SubnetHint(host);
+                if (hint != "") sb.AppendLine("→ " + hint);
                 sb.AppendLine("→ 랜선·PC IP 대역(192.168.1.x)·PLC 전원을 확인하고 결과를 알려 주세요.");
             }
             finally { if (c != null) c.Close(); }

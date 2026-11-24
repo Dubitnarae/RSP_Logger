@@ -225,7 +225,8 @@ namespace RspLogger
                     client.Close();
                     int wait = Backoff[Math.Min(fails, Backoff.Length - 1)];
                     fails++;
-                    onStatus(false, "끊김 (" + e.Message + ") — " + wait + "초 뒤 재접속");
+                    string hint = NetCheck.SubnetHint(client.Host);
+                    onStatus(false, "끊김 (" + e.Message + ") — " + wait + "초 뒤 재접속" + (hint == "" ? "" : " · " + hint));
                     stop.WaitOne(wait * 1000);
                     continue;
                 }

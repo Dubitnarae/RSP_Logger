@@ -392,6 +392,7 @@ namespace RspLogger
             Check(s.Num("ejection.fast_interval_s") == 0.2 && s.Str("record.dir") == "", "주석 붙은 값·빈 문자열");
             var t = Settings.Parse("[record]\ndir = \"D:\\\\RSP # 기록\"  # 주석\n");
             Check(t.Str("record.dir") == "D:\\RSP # 기록", "경로·따옴표 안 #");
+            Check(NetCheck.SubnetHint("127.0.0.1") == "" && NetCheck.SubnetHint("203.0.113.5") != "", "PC IP 대역 검사");
         }
     }
 }

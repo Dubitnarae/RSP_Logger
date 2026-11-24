@@ -7,6 +7,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -108,6 +109,42 @@ namespace RspLogger
         }
     }
 
+    static class NetCheck
+    {
+        // 이 PC의 IPv4 주소들 ("192.168.1.50/255.255.255.0")
+        public static List<string> LocalAddrs()
+        {
+            var r = new List<string>();
+            foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (ni.OperationalStatus != OperationalStatus.Up) continue;
+                foreach (var u in ni.GetIPProperties().UnicastAddresses)
+                    if (u.Address.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(u.Address))
+                        r.Add(u.Address + "/" + u.IPv4Mask);
+            }
+            return r;
+        }
+
+        // PLC와 같은 대역 주소가 이 PC에 없으면 안내 문구, 있으면 "" (PLC는 게이트웨이 없는 같은 대역에서만 닿는다)
+        public static string SubnetHint(string host)
+        {
+            IPAddress plc;
+            if (!IPAddress.TryParse(host, out plc) || IPAddress.IsLoopback(plc)) return "";
+            byte[] p = plc.GetAddressBytes();
+            foreach (var a in LocalAddrs())
+            {
+                var parts = a.Split('/');
+                IPAddress ip, mask;
+                if (!IPAddress.TryParse(parts[0], out ip) || !IPAddress.TryParse(parts[1], out mask)) continue;
+                byte[] x = ip.GetAddressBytes(), m = mask.GetAddressBytes();
+                bool same = true;
+                for (int i = 0; i < 4; i++) if ((x[i] & m[i]) != (p[i] & m[i])) same = false;
+                if (same) return "";
+            }
+            return "이 PC에 " + host + " 와 같은 대역 주소가 없음 (랜 어댑터 IP를 192.168.1.x 로 설정, .2·.188 은 사용 중)";
+        }
+    }
+
     // XGT 클라이언트 — 소켓 1개, 읽기만
     class XgtClient
     {
@@ -116,6 +153,8 @@ namespace RspLogger
         TcpClient tcp;
         NetworkStream ns;
         int invoke;
+
+        public string Host { get { return host; } }
 
         public XgtClient(string host, int port, double timeoutS)
         {
