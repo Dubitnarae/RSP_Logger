@@ -111,6 +111,70 @@ namespace RspLogger
 
     static class NetCheck
     {
+        public static bool SameNet(string a, string b, string mask)
+        {
+            IPAddress x, y, m;
+            if (!IPAddress.TryParse(a, out x) || !IPAddress.TryParse(b, out y) || !IPAddress.TryParse(mask, out m)) return false;
+            byte[] xa = x.GetAddressBytes(), ya = y.GetAddressBytes(), ma = m.GetAddressBytes();
+            if (xa.Length != 4 || ya.Length != 4 || ma.Length != 4) return false;
+            for (int i = 0; i < 4; i++) if ((xa[i] & ma[i]) != (ya[i] & ma[i])) return false;
+            return true;
+        }
+
+        // 게이트웨이 없이 고정 IP (PLC 망은 같은 대역뿐이라 게이트웨이가 필요 없다)
+        public static string NetshStatic(string adapter, string ip, string mask)
+        {
+            return "interface ipv4 set address name=\"" + adapter + "\" source=static address=" + ip + " mask=" + mask + " gateway=none";
+        }
+
+        public static string NetshDhcp(string adapter)
+        {
+            return "interface ipv4 set address name=\"" + adapter + "\" source=dhcp";
+        }
+
+        // 실제 유선·무선 어댑터 (가상·블루투스 빼고), 유선 먼저
+        public static List<NetworkInterface> Adapters()
+        {
+            return NetworkInterface.GetAllNetworkInterfaces()
+                .Where(n => (n.NetworkInterfaceType == NetworkInterfaceType.Ethernet || n.NetworkInterfaceType == NetworkInterfaceType.Wireless80211
+                    || n.NetworkInterfaceType == NetworkInterfaceType.GigabitEthernet)
+                    && !new[] { "Virtual", "Hyper-V", "Bluetooth", "VPN", "TAP-" }.Any(w => n.Description.IndexOf(w, StringComparison.OrdinalIgnoreCase) >= 0))
+                .OrderBy(n => n.NetworkInterfaceType == NetworkInterfaceType.Wireless80211).ThenBy(n => n.Name).ToList();
+        }
+
+        // 고른 어댑터 말고 다른 켜진 연결(와이파이 등)이 PLC 대역 주소를 갖고 있으면 그 이름들
+        public static List<string> OthersOnNet(string adapterId, string plcHost)
+        {
+            var r = new List<string>();
+            foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (ni.Id == adapterId || ni.OperationalStatus != OperationalStatus.Up) continue;
+                foreach (var u in ni.GetIPProperties().UnicastAddresses)
+                    if (u.Address.AddressFamily == AddressFamily.InterNetwork && u.IPv4Mask != null
+                        && SameNet(u.Address.ToString(), plcHost, u.IPv4Mask.ToString()))
+                    { r.Add(ni.Name); break; }
+            }
+            return r;
+        }
+
+        // netsh 를 관리자 권한으로 실행 (UAC 확인 창). 성공이면 null, 아니면 이유.
+        public static string RunNetshAdmin(string args)
+        {
+            try
+            {
+                using (var p = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("netsh", args)
+                    { Verb = "runas", UseShellExecute = true, WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden }))
+                {
+                    if (!p.WaitForExit(30000)) return "netsh 가 30초 안에 끝나지 않았습니다.";
+                    return p.ExitCode == 0 ? null : "netsh 실패 (종료 코드 " + p.ExitCode + "). 어댑터 이름·주소를 확인하세요.";
+                }
+            }
+            catch (System.ComponentModel.Win32Exception e)
+            {
+                return e.NativeErrorCode == 1223 ? "관리자 권한 확인을 취소했습니다." : e.Message;
+            }
+        }
+
         // 이 PC의 IPv4 주소들 ("192.168.1.50/255.255.255.0")
         public static List<string> LocalAddrs()
         {

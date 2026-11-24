@@ -404,6 +404,14 @@ namespace RspLogger
             Check(PlcSettingsForm.Check("192.168.1.2", "2004", "1", out pp, out tt) == null && pp == 2004
                 && PlcSettingsForm.Check("192.168.1", "2004", "1", out pp, out tt) != null
                 && PlcSettingsForm.Check("192.168.1.2", "70000", "1", out pp, out tt) != null, "PLC 접속 설정 입력 검사");
+            Check(NetCheck.SameNet("192.168.1.50", "192.168.1.2", "255.255.255.0") && !NetCheck.SameNet("192.168.2.50", "192.168.1.2", "255.255.255.0")
+                && PlcSettingsForm.CheckPcIp("192.168.1.50", "255.255.255.0", "192.168.1.2") == null
+                && PlcSettingsForm.CheckPcIp("192.168.1.2", "255.255.255.0", "192.168.1.2") != null
+                && PlcSettingsForm.CheckPcIp("192.168.2.50", "255.255.255.0", "192.168.1.2") != null
+                && PlcSettingsForm.CheckPcIp("192.168.1", "255.255.255.0", "192.168.1.2") != null, "노트북 IP 입력 검사");
+            Check(NetCheck.NetshStatic("이더넷", "192.168.1.50", "255.255.255.0")
+                == "interface ipv4 set address name=\"이더넷\" source=static address=192.168.1.50 mask=255.255.255.0 gateway=none"
+                && NetCheck.NetshDhcp("이더넷") == "interface ipv4 set address name=\"이더넷\" source=dhcp", "netsh 인수");
         }
     }
 }

@@ -259,6 +259,10 @@ namespace RspLogger
     {
         readonly string path;
         readonly TextBox tHost = new TextBox { Width = 160 }, tPort = new TextBox { Width = 80 }, tTimeout = new TextBox { Width = 80 };
+        readonly TextBox tPcIp = new TextBox { Width = 160 }, tPcMask = new TextBox { Width = 160, Text = "255.255.255.0" };
+        readonly ComboBox cAdapter = new ComboBox { Width = 300, DropDownStyle = ComboBoxStyle.DropDownList };
+        readonly Label pcLbl = new Label { AutoSize = true, ForeColor = Color.DimGray, MaximumSize = new Size(400, 0) };
+        List<System.Net.NetworkInformation.NetworkInterface> adapters;
 
         public PlcSettingsForm(string path)
         {
@@ -272,6 +276,7 @@ namespace RspLogger
             tHost.Text = cfg.Str("plc.host");
             tPort.Text = cfg.Num("plc.port").ToString(App.Inv);
             tTimeout.Text = cfg.Num("plc.timeout_s").ToString(App.Inv);
+            try { tPcIp.Text = cfg.Str("pc.ip"); } catch (KeyNotFoundException) { tPcIp.Text = "192.168.1.50"; }
 
             var g = new TableLayoutPanel { ColumnCount = 2, AutoSize = true, Padding = new Padding(12) };
             Action<string, Control> row = (label, c) =>
@@ -282,21 +287,105 @@ namespace RspLogger
             row("PLC IP 주소", tHost);
             row("포트 (보통 2004)", tPort);
             row("응답 대기 (초)", tTimeout);
-            var pcLbl = new Label { AutoSize = true, ForeColor = Color.DimGray, MaximumSize = new Size(380, 0),
-                Text = "이 PC 주소: " + string.Join(", ", NetCheck.LocalAddrs())
-                    + "\nPC 주소는 PLC와 같은 대역(예: 192.168.1.x)이어야 합니다. PC 주소는 윈도우 랜 어댑터 설정에서 바꿉니다." };
-            g.Controls.Add(pcLbl); g.SetColumnSpan(pcLbl, 2);
-
             var bTest = new Button { Text = "연결 시험", AutoSize = true };
             var bSave = new Button { Text = "저장", AutoSize = true };
-            var bCancel = new Button { Text = "닫기", AutoSize = true, DialogResult = DialogResult.Cancel };
             bTest.Click += (s, e) => Test();
             bSave.Click += (s, e) => Save();
             var btns = new FlowLayoutPanel { AutoSize = true };
-            btns.Controls.AddRange(new Control[] { bTest, bSave, bCancel });
+            btns.Controls.AddRange(new Control[] { bTest, bSave });
             g.Controls.Add(btns); g.SetColumnSpan(btns, 2);
+
+            var head = new Label { AutoSize = true, Font = new Font(Font, FontStyle.Bold), Margin = new Padding(3, 14, 3, 3),
+                Text = "노트북 IP (바꿀 때 관리자 권한 확인 창이 뜹니다)" };
+            g.Controls.Add(head); g.SetColumnSpan(head, 2);
+            row("연결 (랜 어댑터)", cAdapter);
+            row("노트북 IP", tPcIp);
+            row("서브넷 마스크", tPcMask);
+            var bApply = new Button { Text = "고정 IP 적용", AutoSize = true };
+            var bDhcp = new Button { Text = "자동(DHCP)으로 되돌리기", AutoSize = true };
+            bApply.Click += (s, e) => ApplyPcIp();
+            bDhcp.Click += (s, e) => ApplyDhcp();
+            var pcBtns = new FlowLayoutPanel { AutoSize = true };
+            pcBtns.Controls.AddRange(new Control[] { bApply, bDhcp });
+            g.Controls.Add(pcBtns); g.SetColumnSpan(pcBtns, 2);
+            g.Controls.Add(pcLbl); g.SetColumnSpan(pcLbl, 2);
+
+            var bCancel = new Button { Text = "닫기", AutoSize = true, DialogResult = DialogResult.Cancel, Anchor = AnchorStyles.Right };
+            g.Controls.Add(bCancel); g.SetColumnSpan(bCancel, 2);
             Controls.Add(g);
             CancelButton = bCancel;
+            LoadAdapters();
+        }
+
+        void LoadAdapters()
+        {
+            adapters = NetCheck.Adapters();
+            cAdapter.Items.Clear();
+            foreach (var n in adapters)
+                cAdapter.Items.Add(n.Name + " — " + (n.OperationalStatus == System.Net.NetworkInformation.OperationalStatus.Up ? "연결됨" : "연결 안 됨")
+                    + " (" + n.Description + ")");
+            if (cAdapter.Items.Count > 0) cAdapter.SelectedIndex = 0;   // 목록이 유선 먼저
+            pcLbl.Text = "이 PC 주소: " + string.Join(", ", NetCheck.LocalAddrs())
+                + "\n랜선을 꽂은 유선 연결을 고르세요. 현장에서는 와이파이를 끄는 것이 안전합니다.";
+        }
+
+        // 노트북 IP 입력 검사. 맞으면 null
+        public static string CheckPcIp(string ip, string mask, string plcHost)
+        {
+            System.Net.IPAddress a;
+            if (ip.Split('.').Length != 4 || !System.Net.IPAddress.TryParse(ip, out a)) return "노트북 IP 형식이 틀렸습니다 (예: 192.168.1.50).";
+            if (mask.Split('.').Length != 4 || !System.Net.IPAddress.TryParse(mask, out a)) return "서브넷 마스크 형식이 틀렸습니다 (보통 255.255.255.0).";
+            if (ip == plcHost) return "PLC와 같은 주소는 쓸 수 없습니다.";
+            if (!NetCheck.SameNet(ip, plcHost, mask)) return "PLC(" + plcHost + ")와 대역이 다릅니다. 같은 대역(예: 앞 세 자리가 같은 주소)으로 넣으세요.";
+            return null;
+        }
+
+        System.Net.NetworkInformation.NetworkInterface Selected()
+        {
+            if (cAdapter.SelectedIndex < 0) { MessageBox.Show(this, "연결(랜 어댑터)을 고르세요.", Text); return null; }
+            return adapters[cAdapter.SelectedIndex];
+        }
+
+        void ApplyPcIp()
+        {
+            var ni = Selected();
+            if (ni == null) return;
+            string ip = tPcIp.Text.Trim(), mask = tPcMask.Text.Trim(), plc = tHost.Text.Trim();
+            string err = CheckPcIp(ip, mask, plc);
+            if (err != null) { MessageBox.Show(this, err, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            if (MessageBox.Show(this, "'" + ni.Name + "' 연결을 고정 IP " + ip + " / " + mask + " (게이트웨이 없음)으로 바꿉니다.\n"
+                + "이 연결로 인터넷을 쓰고 있었다면 인터넷이 끊길 수 있습니다. 나중에 '자동(DHCP)으로 되돌리기'로 돌아갈 수 있습니다.\n계속할까요?",
+                Text, MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+            Cursor = Cursors.WaitCursor;
+            string r = NetCheck.RunNetshAdmin(NetCheck.NetshStatic(ni.Name, ip, mask));
+            Cursor = Cursors.Default;
+            if (r != null) { MessageBox.Show(this, r, "노트북 IP 바꾸기 실패", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            try
+            {
+                string s = File.ReadAllText(path, System.Text.Encoding.UTF8);
+                File.WriteAllText(path, Settings.SetValue(s, "pc", "ip", "\"" + ip + "\""), new System.Text.UTF8Encoding(false));
+            }
+            catch (Exception) { }   // 기록용 값이라 저장 실패는 무시 (IP는 이미 바뀜)
+            System.Threading.Thread.Sleep(1500);   // 윈도우가 새 주소를 올릴 시간
+            LoadAdapters();
+            string msg = "노트북 IP를 " + ip + " 로 바꿨습니다.";
+            var others = NetCheck.OthersOnNet(ni.Id, plc);
+            if (others.Count > 0) msg += "\n\n주의: 다른 연결(" + string.Join(", ", others) + ")도 같은 대역입니다. PLC 통신이 그쪽으로 샐 수 있으니 와이파이 등을 끄세요.";
+            MessageBox.Show(this, msg, Text);
+        }
+
+        void ApplyDhcp()
+        {
+            var ni = Selected();
+            if (ni == null) return;
+            if (MessageBox.Show(this, "'" + ni.Name + "' 연결을 자동(DHCP)으로 되돌릴까요?", Text, MessageBoxButtons.YesNo) != DialogResult.Yes) return;
+            Cursor = Cursors.WaitCursor;
+            string r = NetCheck.RunNetshAdmin(NetCheck.NetshDhcp(ni.Name));
+            Cursor = Cursors.Default;
+            if (r != null) { MessageBox.Show(this, r, "되돌리기 실패", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            System.Threading.Thread.Sleep(1500);
+            LoadAdapters();
+            MessageBox.Show(this, "자동(DHCP)으로 되돌렸습니다.", Text);
         }
 
         // 입력 검사. 맞으면 null, 틀리면 안내 문구
