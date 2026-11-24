@@ -253,4 +253,100 @@ namespace RspLogger
             onSaved();
         }
     }
+
+    // PLC 접속 설정 — settings.toml 의 [plc] host·port·timeout_s 를 고친다. 저장 전 그 값으로 읽기 시험 가능.
+    class PlcSettingsForm : Form
+    {
+        readonly string path;
+        readonly TextBox tHost = new TextBox { Width = 160 }, tPort = new TextBox { Width = 80 }, tTimeout = new TextBox { Width = 80 };
+
+        public PlcSettingsForm(string path)
+        {
+            this.path = path;
+            Text = "PLC 접속 설정";
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            MaximizeBox = MinimizeBox = false;
+            StartPosition = FormStartPosition.CenterParent;
+            AutoSize = true; AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            var cfg = Settings.Parse(File.ReadAllText(path, System.Text.Encoding.UTF8).TrimStart('\uFEFF'));
+            tHost.Text = cfg.Str("plc.host");
+            tPort.Text = cfg.Num("plc.port").ToString(App.Inv);
+            tTimeout.Text = cfg.Num("plc.timeout_s").ToString(App.Inv);
+
+            var g = new TableLayoutPanel { ColumnCount = 2, AutoSize = true, Padding = new Padding(12) };
+            Action<string, Control> row = (label, c) =>
+            {
+                g.Controls.Add(new Label { Text = label, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(3, 7, 3, 3) });
+                g.Controls.Add(c);
+            };
+            row("PLC IP 주소", tHost);
+            row("포트 (보통 2004)", tPort);
+            row("응답 대기 (초)", tTimeout);
+            var pcLbl = new Label { AutoSize = true, ForeColor = Color.DimGray, MaximumSize = new Size(380, 0),
+                Text = "이 PC 주소: " + string.Join(", ", NetCheck.LocalAddrs())
+                    + "\nPC 주소는 PLC와 같은 대역(예: 192.168.1.x)이어야 합니다. PC 주소는 윈도우 랜 어댑터 설정에서 바꿉니다." };
+            g.Controls.Add(pcLbl); g.SetColumnSpan(pcLbl, 2);
+
+            var bTest = new Button { Text = "연결 시험", AutoSize = true };
+            var bSave = new Button { Text = "저장", AutoSize = true };
+            var bCancel = new Button { Text = "닫기", AutoSize = true, DialogResult = DialogResult.Cancel };
+            bTest.Click += (s, e) => Test();
+            bSave.Click += (s, e) => Save();
+            var btns = new FlowLayoutPanel { AutoSize = true };
+            btns.Controls.AddRange(new Control[] { bTest, bSave, bCancel });
+            g.Controls.Add(btns); g.SetColumnSpan(btns, 2);
+            Controls.Add(g);
+            CancelButton = bCancel;
+        }
+
+        // 입력 검사. 맞으면 null, 틀리면 안내 문구
+        public static string Check(string host, string port, string timeout, out int p, out double t)
+        {
+            p = 0; t = 0;
+            System.Net.IPAddress ip;
+            if (host.Split('.').Length != 4 || !System.Net.IPAddress.TryParse(host, out ip)) return "IP 주소 형식이 틀렸습니다 (예: 192.168.1.2).";
+            if (!int.TryParse(port, NumberStyles.None, App.Inv, out p) || p < 1 || p > 65535) return "포트는 1~65535 숫자입니다.";
+            if (!double.TryParse(timeout, NumberStyles.Float, App.Inv, out t) || t < 0.2 || t > 30) return "응답 대기는 0.2~30초입니다.";
+            return null;
+        }
+
+        void Test()
+        {
+            int p; double t;
+            string host = tHost.Text.Trim();
+            string err = Check(host, tPort.Text.Trim(), tTimeout.Text.Trim(), out p, out t);
+            if (err != null) { MessageBox.Show(this, err, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            var c = new XgtClient(host, p, t);
+            string msg;
+            Cursor = Cursors.WaitCursor;
+            try { c.Connect(); msg = "접속 성공. D401 = " + c.ReadWord("D401"); }
+            catch (Exception e)
+            {
+                msg = "접속 실패: " + e.Message;
+                string hint = NetCheck.SubnetHint(host);
+                if (hint != "") msg += "\n→ " + hint;
+            }
+            finally { c.Close(); Cursor = Cursors.Default; }
+            MessageBox.Show(this, msg, "연결 시험");
+        }
+
+        void Save()
+        {
+            int p; double t;
+            string host = tHost.Text.Trim();
+            string err = Check(host, tPort.Text.Trim(), tTimeout.Text.Trim(), out p, out t);
+            if (err != null) { MessageBox.Show(this, err, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            try
+            {
+                string s = File.ReadAllText(path, System.Text.Encoding.UTF8);
+                s = Settings.SetValue(s, "plc", "host", "\"" + host + "\"");
+                s = Settings.SetValue(s, "plc", "port", p.ToString(App.Inv));
+                s = Settings.SetValue(s, "plc", "timeout_s", t.ToString(App.Inv));
+                Settings.Parse(s.TrimStart('\uFEFF'));   // 다시 읽히는지 확인한 뒤 저장
+                File.WriteAllText(path, s, new System.Text.UTF8Encoding(false));
+            }
+            catch (Exception e) { MessageBox.Show(this, e.Message, "저장 실패", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            DialogResult = DialogResult.OK;
+        }
+    }
 }

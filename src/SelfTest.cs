@@ -341,6 +341,9 @@ namespace RspLogger
                 te.SetRaws(new Dictionary<string, long> { { "p_upper", 25 } });
                 Check(true, "태그 설정 창 만들기·원시값 표시");
             }
+            string st = Path.Combine(dir, "settings.toml");
+            File.WriteAllBytes(st, App.DefaultBytes("settings.toml"));
+            using (var f = new PlcSettingsForm(st)) Check(f.Controls.Count > 0, "PLC 접속 설정 창 만들기");
         }
 
         static void NoEjectionDupName()
@@ -393,6 +396,14 @@ namespace RspLogger
             var t = Settings.Parse("[record]\ndir = \"D:\\\\RSP # 기록\"  # 주석\n");
             Check(t.Str("record.dir") == "D:\\RSP # 기록", "경로·따옴표 안 #");
             Check(NetCheck.SubnetHint("127.0.0.1") == "" && NetCheck.SubnetHint("203.0.113.5") != "", "PC IP 대역 검사");
+            string toml = "[plc]\r\nhost = \"192.168.1.2\"  # PLC\r\nport = 2004\r\n[x]\r\nport = 1\r\n";
+            var u = Settings.Parse(Settings.SetValue(Settings.SetValue(toml, "plc", "host", "\"10.0.0.7\""), "plc", "port", "502"));
+            Check(u.Str("plc.host") == "10.0.0.7" && u.Num("plc.port") == 502 && u.Num("x.port") == 1
+                && Settings.SetValue(toml, "plc", "host", "\"a\"").Contains("# PLC\r\n"), "설정 값 바꾸기(주석·다른 구역 유지)");
+            int pp; double tt;
+            Check(PlcSettingsForm.Check("192.168.1.2", "2004", "1", out pp, out tt) == null && pp == 2004
+                && PlcSettingsForm.Check("192.168.1", "2004", "1", out pp, out tt) != null
+                && PlcSettingsForm.Check("192.168.1.2", "70000", "1", out pp, out tt) != null, "PLC 접속 설정 입력 검사");
         }
     }
 }

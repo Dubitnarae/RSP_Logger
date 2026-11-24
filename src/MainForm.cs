@@ -152,6 +152,7 @@ namespace RspLogger
             var file = new ToolStripMenuItem("파일");
             file.DropDownItems.Add("지난 기록 열기…", null, (s, e) => OpenHistory());
             file.DropDownItems.Add("태그 설정 · 환산 확인…", null, (s, e) => OpenTagEditor());
+            file.DropDownItems.Add("PLC 접속 설정 (IP)…", null, (s, e) => OpenPlcSettings());
             file.DropDownItems.Add(new ToolStripSeparator());
             file.DropDownItems.Add(dev ? "현장 모드로 다시 시작" : "개발 모드(가상 PLC)로 다시 시작", null, (s, e) => SwitchMode());
             var help = new ToolStripMenuItem("도움말");
@@ -327,6 +328,14 @@ namespace RspLogger
                     "tags.csv 를 저장했습니다. 다시 시작해야 반영됩니다. 지금 다시 시작할까요?")) { Owner = this };
             tagEditor.Show();
             tagEditor.Activate();
+        }
+
+        void OpenPlcSettings()
+        {
+            using (var f = new PlcSettingsForm(Path.Combine(App.ConfigDir, "settings.toml")))
+                if (f.ShowDialog(this) == DialogResult.OK)
+                    Restart(dev, "PLC 접속 설정 저장됨", "settings.toml 을 저장했습니다. 다시 시작해야 반영됩니다. 지금 다시 시작할까요?"
+                        + (dev ? "\n(지금은 개발 모드라 가상 PLC에 붙습니다. 새 주소는 현장 모드에서 씁니다.)" : ""));
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)

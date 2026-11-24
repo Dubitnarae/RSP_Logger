@@ -17,8 +17,8 @@ using System.Windows.Forms;
 [assembly: System.Reflection.AssemblyProduct("RSP Logger")]
 [assembly: System.Reflection.AssemblyCompany("KIM YEONGDO")]
 [assembly: System.Reflection.AssemblyCopyright("Copyright (c) 2026 KIM YEONGDO")]
-[assembly: System.Reflection.AssemblyVersion("0.3.1.0")]
-[assembly: System.Reflection.AssemblyFileVersion("0.3.1.0")]
+[assembly: System.Reflection.AssemblyVersion("0.4.0.0")]
+[assembly: System.Reflection.AssemblyFileVersion("0.4.0.0")]
 
 namespace RspLogger
 {
@@ -114,6 +114,25 @@ namespace RspLogger
         }
 
         public double Num(string k) { return double.Parse(Raw(k), NumberStyles.Float, App.Inv); }
+
+        // [sec] 안 key 줄의 값만 바꾼 글을 돌려준다 (다른 줄·뒤 주석은 그대로). 키가 없으면 예외.
+        public static string SetValue(string text, string sec, string key, string value)
+        {
+            var lines = text.Split('\n');
+            string cur = "";
+            for (int i = 0; i < lines.Length; i++)
+            {
+                string body = StripComment(lines[i]), t = body.Trim();
+                if (t.StartsWith("[")) { cur = t.Trim('[', ']').Trim(); continue; }
+                int eq = body.IndexOf('=');
+                if (cur != sec || eq < 0 || body.Substring(0, eq).Trim() != key) continue;
+                bool cr = lines[i].EndsWith("\r");
+                string rest = lines[i].Substring(body.Length).TrimEnd('\r');
+                lines[i] = body.Substring(0, eq + 1) + " " + value + (rest == "" ? "" : "  " + rest) + (cr ? "\r" : "");
+                return string.Join("\n", lines);
+            }
+            throw new KeyNotFoundException("settings.toml 에 " + sec + "." + key + " 항목이 없습니다.");
+        }
     }
 
     // CSV — 파이썬 csv 모듈과 같은 규칙(필요할 때만 따옴표, 줄 끝 \r\n)
