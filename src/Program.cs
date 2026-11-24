@@ -17,8 +17,8 @@ using System.Windows.Forms;
 [assembly: System.Reflection.AssemblyProduct("RSP Logger")]
 [assembly: System.Reflection.AssemblyCompany("KIM YEONGDO")]
 [assembly: System.Reflection.AssemblyCopyright("Copyright (c) 2026 KIM YEONGDO")]
-[assembly: System.Reflection.AssemblyVersion("0.5.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("0.5.0.0")]
+[assembly: System.Reflection.AssemblyVersion("0.5.1.0")]
+[assembly: System.Reflection.AssemblyFileVersion("0.5.1.0")]
 
 namespace RspLogger
 {

@@ -340,8 +340,33 @@ namespace RspLogger
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
+            // 다시 시작(메뉴)일 때는 묻지 않는다. 윈도우 종료 중에는 창을 붙잡지 않는다.
+            if (RestartArgs == null && e.CloseReason != CloseReason.WindowsShutDown && IpRestore.Pending && !AskIpRestore())
+            {
+                e.Cancel = true;
+                return;
+            }
             if (recorder.Active) StopRun(false);   // 닫을 때도 파일을 닫아 기록을 보존
             base.OnFormClosing(e);
+        }
+
+        // 종료할 때 노트북 IP를 원래대로 되돌릴지 묻는다. 종료를 취소하면 false.
+        bool AskIpRestore()
+        {
+            string desc;
+            try { desc = IpRestore.Describe(IpRestore.Load()); } catch (Exception) { desc = "(기억 파일을 읽지 못함)"; }
+            var a = MessageBox.Show(this, "노트북 IP가 고정 IP로 바뀌어 있습니다.\n\n원래 설정: " + desc
+                + "\n\n예: 원래 설정으로 되돌리고 종료 (관리자 권한 확인 창이 뜹니다)\n아니요: 고정 IP 유지하고 종료\n취소: 종료하지 않음",
+                "노트북 IP 되돌리기", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+            if (a == DialogResult.Cancel) return false;
+            if (a == DialogResult.Yes)
+            {
+                string r = IpRestore.Restore();
+                if (r != null)
+                    return MessageBox.Show(this, "되돌리지 못했습니다: " + r + "\n\n그래도 종료할까요? (다음에 종료할 때 다시 묻습니다)",
+                        "노트북 IP 되돌리기", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes;
+            }
+            return true;
         }
 
         // ---------- 화면 갱신 ----------

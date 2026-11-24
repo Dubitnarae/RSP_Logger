@@ -356,10 +356,18 @@ namespace RspLogger
             if (MessageBox.Show(this, "'" + ni.Name + "' 연결을 고정 IP " + ip + " / " + mask + " (게이트웨이 없음)으로 바꿉니다.\n"
                 + "이 연결로 인터넷을 쓰고 있었다면 인터넷이 끊길 수 있습니다. 나중에 '자동(DHCP)으로 되돌리기'로 돌아갈 수 있습니다.\n계속할까요?",
                 Text, MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+            bool remembered;
+            try { remembered = IpRestore.Remember(ni); }
+            catch (Exception e) { MessageBox.Show(this, "원래 설정을 기억하지 못해 바꾸지 않았습니다: " + e.Message, Text); return; }
             Cursor = Cursors.WaitCursor;
             string r = NetCheck.RunNetshAdmin(NetCheck.NetshStatic(ni.Name, ip, mask));
             Cursor = Cursors.Default;
-            if (r != null) { MessageBox.Show(this, r, "노트북 IP 바꾸기 실패", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            if (r != null)
+            {
+                if (remembered) IpRestore.Forget();   // 안 바뀌었으니 되돌릴 것도 없다
+                MessageBox.Show(this, r, "노트북 IP 바꾸기 실패", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
             try
             {
                 string s = File.ReadAllText(path, System.Text.Encoding.UTF8);
@@ -383,6 +391,7 @@ namespace RspLogger
             string r = NetCheck.RunNetshAdmin(NetCheck.NetshDhcp(ni.Name));
             Cursor = Cursors.Default;
             if (r != null) { MessageBox.Show(this, r, "되돌리기 실패", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            IpRestore.Forget();   // 직접 되돌렸으니 종료 때 묻지 않는다
             System.Threading.Thread.Sleep(1500);
             LoadAdapters();
             MessageBox.Show(this, "자동(DHCP)으로 되돌렸습니다.", Text);

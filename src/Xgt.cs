@@ -209,6 +209,74 @@ namespace RspLogger
         }
     }
 
+    // 고정 IP 적용 전 원래 노트북 IP 설정을 config/ip_restore.txt 에 기억했다가 종료할 때 되돌린다.
+    // 파일이 있으면 "아직 원래대로 안 돌린 상태". 여러 번 적용해도 처음 원래 설정을 지킨다.
+    static class IpRestore
+    {
+        static string FilePath { get { return Path.Combine(App.ConfigDir, "ip_restore.txt"); } }
+
+        public static bool Pending { get { return File.Exists(FilePath); } }
+
+        // 지금 설정을 기억 (이미 기억한 게 있으면 그대로 둠). 새로 기억했으면 true.
+        public static bool Remember(NetworkInterface ni)
+        {
+            if (Pending) return false;
+            var ip = ni.GetIPProperties();
+            var v = new Dictionary<string, string> { { "adapter", ni.Name }, { "dhcp", "1" } };
+            var u = ip.UnicastAddresses.FirstOrDefault(a => a.Address.AddressFamily == AddressFamily.InterNetwork && a.IPv4Mask != null);
+            bool dhcp;
+            try { dhcp = ip.GetIPv4Properties().IsDhcpEnabled; } catch (Exception) { dhcp = true; }
+            if (!dhcp && u != null)   // 원래 고정 IP였으면 주소·마스크·게이트웨이까지
+            {
+                var gw = ip.GatewayAddresses.FirstOrDefault(g => g.Address.AddressFamily == AddressFamily.InterNetwork);
+                v["dhcp"] = "0";
+                v["address"] = u.Address.ToString();
+                v["mask"] = u.IPv4Mask.ToString();
+                v["gateway"] = gw == null ? "none" : gw.Address.ToString();
+            }
+            Directory.CreateDirectory(App.ConfigDir);
+            File.WriteAllLines(FilePath, v.Select(kv => kv.Key + "=" + kv.Value), new UTF8Encoding(false));
+            return true;
+        }
+
+        public static void Forget() { if (Pending) File.Delete(FilePath); }
+
+        public static Dictionary<string, string> Load()
+        {
+            var v = new Dictionary<string, string>();
+            foreach (var line in File.ReadAllLines(FilePath, Encoding.UTF8))
+            {
+                int eq = line.IndexOf('=');
+                if (eq > 0) v[line.Substring(0, eq).Trim()] = line.Substring(eq + 1).Trim();
+            }
+            return v;
+        }
+
+        public static string Describe(Dictionary<string, string> v)
+        {
+            return "'" + v["adapter"] + "' → " + (v["dhcp"] == "1" ? "자동(DHCP)" : "고정 IP " + v["address"] + " / " + v["mask"]
+                + (v["gateway"] == "none" ? "" : ", 게이트웨이 " + v["gateway"]));
+        }
+
+        public static string NetshArgs(Dictionary<string, string> v)
+        {
+            if (v["dhcp"] == "1") return NetCheck.NetshDhcp(v["adapter"]);
+            return "interface ipv4 set address name=\"" + v["adapter"] + "\" source=static address=" + v["address"]
+                + " mask=" + v["mask"] + " gateway=" + v["gateway"];
+        }
+
+        // 원래대로 되돌린다. 성공이면 null (기억 파일도 지움), 실패면 이유.
+        public static string Restore()
+        {
+            Dictionary<string, string> v;
+            try { v = Load(); } catch (Exception e) { return "기억해 둔 설정을 읽지 못했습니다: " + e.Message; }
+            if (!v.ContainsKey("adapter") || !v.ContainsKey("dhcp")) return "기억해 둔 설정이 깨져 있습니다: " + FilePath;
+            string r = NetCheck.RunNetshAdmin(NetshArgs(v));
+            if (r == null) Forget();
+            return r;
+        }
+    }
+
     // XGT 클라이언트 — 소켓 1개, 읽기만
     class XgtClient
     {

@@ -412,6 +412,11 @@ namespace RspLogger
             Check(NetCheck.NetshStatic("이더넷", "192.168.1.50", "255.255.255.0")
                 == "interface ipv4 set address name=\"이더넷\" source=static address=192.168.1.50 mask=255.255.255.0 gateway=none"
                 && NetCheck.NetshDhcp("이더넷") == "interface ipv4 set address name=\"이더넷\" source=dhcp", "netsh 인수");
+            var dv = new Dictionary<string, string> { { "adapter", "이더넷" }, { "dhcp", "1" } };
+            var sv = new Dictionary<string, string> { { "adapter", "이더넷" }, { "dhcp", "0" }, { "address", "10.1.2.3" }, { "mask", "255.255.0.0" }, { "gateway", "10.1.0.1" } };
+            Check(IpRestore.NetshArgs(dv) == NetCheck.NetshDhcp("이더넷")
+                && IpRestore.NetshArgs(sv) == "interface ipv4 set address name=\"이더넷\" source=static address=10.1.2.3 mask=255.255.0.0 gateway=10.1.0.1"
+                && IpRestore.Describe(sv).Contains("게이트웨이 10.1.0.1"), "원래 IP 되돌리기 인수");
         }
     }
 }

@@ -6,3 +6,4 @@ CLAUDE.md
 build/
 dist/
 selftest_out.txt
+config/ip_restore.txt
