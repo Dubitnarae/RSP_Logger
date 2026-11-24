@@ -17,8 +17,8 @@ using System.Windows.Forms;
 [assembly: System.Reflection.AssemblyProduct("RSP Logger")]
 [assembly: System.Reflection.AssemblyCompany("KIM YEONGDO")]
 [assembly: System.Reflection.AssemblyCopyright("Copyright (c) 2026 KIM YEONGDO")]
-[assembly: System.Reflection.AssemblyVersion("0.5.1.0")]
-[assembly: System.Reflection.AssemblyFileVersion("0.5.1.0")]
+[assembly: System.Reflection.AssemblyVersion("0.6.0.0")]
+[assembly: System.Reflection.AssemblyFileVersion("0.6.0.0")]
 
 namespace RspLogger
 {
@@ -59,6 +59,14 @@ namespace RspLogger
         public static double Now() { return (DateTime.UtcNow - Epoch).TotalSeconds; }
         public static DateTime Local(double ts) { return Epoch.AddSeconds(ts).ToLocalTime(); }
         public static string Stamp(double ts) { return Local(ts).ToString("yyyy-MM-dd HH:mm:ss.fff", Inv); }
+
+        // tags.csv 에서 INT32 인 주소의 HMI 키 ("@D380")
+        public static List<string> Int32Keys(List<Tag> tags)
+        {
+            return tags.Where(t => t.Type == "INT32").Select(t => "@" + t.Area + t.Word.ToString(Inv)).ToList();
+        }
+
+        public static string SettingsPath { get { return Path.Combine(ConfigDir, "settings.toml"); } }
 
         public static void Restart(string args)
         {
@@ -114,6 +122,19 @@ namespace RspLogger
         }
 
         public double Num(string k) { return double.Parse(Raw(k), NumberStyles.Float, App.Inv); }
+
+        public string StrOr(string k, string def) { return v.ContainsKey(k) ? Str(k) : def; }
+
+        // SetValue 와 같되 항목이 없으면 만든다 (구역이 없으면 끝에 구역째 추가)
+        public static string Upsert(string text, string sec, string key, string value)
+        {
+            try { return SetValue(text, sec, key, value); }
+            catch (KeyNotFoundException) { }
+            var lines = text.Split('\n').ToList();
+            int h = lines.FindIndex(l => StripComment(l).Trim() == "[" + sec + "]");
+            if (h >= 0) { lines.Insert(h + 1, key + " = " + value + "\r"); return string.Join("\n", lines); }
+            return text.TrimEnd('\r', '\n') + "\r\n\r\n[" + sec + "]\r\n" + key + " = " + value + "\r\n";
+        }
 
         // [sec] 안 key 줄의 값만 바꾼 글을 돌려준다 (다른 줄·뒤 주석은 그대로). 키가 없으면 예외.
         public static string SetValue(string text, string sec, string key, string value)
@@ -213,11 +234,22 @@ namespace RspLogger
                 var tags = Tags.Load(Path.Combine(App.ConfigDir, "tags.csv"));
                 string dir = cfg.Str("record.dir");
                 if (dir == "") dir = Path.Combine(App.ExeDir, dev ? "data_dev" : "data");
-                var rec = new Recorder(dir, tags, cfg.Num("poll.interval_s"), cfg.Num("ejection.pre_s"), cfg.Num("ejection.post_s"));
+                List<string> hmiKeys = null;
+                string hmiFile = cfg.StrOr("hmi.file", "");
+                if (hmiFile != "")
+                {
+                    try { hmiKeys = HmiScreen.Load(hmiFile).WordKeys(App.Int32Keys(tags)); }
+                    catch (Exception e)
+                    {
+                        MessageBox.Show("HMI 원본 파일을 읽지 못해 HMI 화면 기록 없이 시작합니다:\n" + hmiFile + "\n" + e.Message, App.Name,
+                            MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    }
+                }
+                var rec = new Recorder(dir, tags, cfg.Num("poll.interval_s"), cfg.Num("ejection.pre_s"), cfg.Num("ejection.post_s"), hmiKeys);
                 win = new MainForm(tags, host + ":" + port, cfg.Num("process.wheel_diameter_mm"), rec, dev);
                 win.FastInterval = cfg.Num("ejection.fast_interval_s");
                 poller = new Poller(new XgtClient(host, port, cfg.Num("plc.timeout_s")), tags, cfg.Num("poll.interval_s"),
-                    win.OnDataFromThread, win.OnStatusFromThread);
+                    win.OnDataFromThread, win.OnStatusFromThread, hmiKeys);
                 win.Poller = poller;
             }
             catch (Exception e)

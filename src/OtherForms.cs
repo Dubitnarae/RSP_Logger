@@ -92,8 +92,11 @@ namespace RspLogger
                 Text = meta.Count > 0 ? string.Join("   ", meta.Select(m => m.Key + ": " + m.Value)) : "(메타데이터 없음)",
                 Dock = DockStyle.Top, AutoSize = true, MaximumSize = new Size(1100, 0), Padding = new Padding(6),
             };
+            var hmiBtn = new Button { Text = "HMI 화면으로 다시보기", AutoSize = true, Dock = DockStyle.Top, Enabled = File.Exists(HmiReplayForm.HmiCsvPath(path)) };
+            hmiBtn.Click += (s, e) => HmiReplayForm.Open(this, path);
             Controls.Add(chart);
             Controls.Add(list);
+            Controls.Add(hmiBtn);
             Controls.Add(info);
             Redraw();
         }

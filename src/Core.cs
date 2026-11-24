@@ -185,13 +185,20 @@ namespace RspLogger
         readonly Action<bool, string> onStatus;
         readonly ManualResetEvent stop = new ManualResetEvent(false);
         Thread th;
+        // HMI 화면용 워드 (키 "@D401"). PLC가 오류로 거부하면 이 묶음만 그만 읽는다 — 공정값 기록은 계속.
+        public readonly List<Block> HmiBlocks = new List<Block>();
+        volatile bool hmiOff;
+        public string HmiError;
 
         public Poller(XgtClient client, List<Tag> tags, double interval,
-            Action<double, Dictionary<string, double>, Dictionary<string, long>> onData, Action<bool, string> onStatus)
+            Action<double, Dictionary<string, double>, Dictionary<string, long>> onData, Action<bool, string> onStatus,
+            IEnumerable<string> hmiKeys = null)
         {
             this.client = client; this.tags = tags; this.onData = onData; this.onStatus = onStatus;
             BaseInterval = this.interval = Math.Max(MinInterval, interval);
             Blocks = Tags.PlanBlocks(tags);
+            if (hmiKeys != null)
+                HmiBlocks = Tags.PlanBlocks(hmiKeys.Select(k => new Tag { Key = k, Area = k[1], Word = int.Parse(k.Substring(2), App.Inv), Type = "INT16" }).ToList());
         }
 
         public void SetInterval(double s) { interval = Math.Max(MinInterval, s); }
@@ -235,6 +242,23 @@ namespace RspLogger
                 Dictionary<string, double> values;
                 Dictionary<string, long> raws;
                 Tags.Decode(tags, Blocks, results, out values, out raws);
+                if (!hmiOff && HmiBlocks.Count > 0)
+                {
+                    try
+                    {
+                        foreach (var b in HmiBlocks)
+                        {
+                            var w = client.ReadWords(b.Area, b.Start, b.Count);
+                            for (int i = 0; i < w.Length; i++) raws["@" + b.Area + (b.Start + i).ToString(App.Inv)] = w[i];
+                        }
+                    }
+                    catch (XgtError e)
+                    {
+                        hmiOff = true;
+                        HmiError = e.Message;
+                        foreach (var k in raws.Keys.Where(k => k.StartsWith("@")).ToList()) raws.Remove(k);
+                    }
+                }
                 onData(App.Now(), values, raws);
                 double rest = interval - (sw.Elapsed.TotalSeconds - t0);
                 if (rest > 0) stop.WaitOne((int)(rest * 1000));
@@ -280,6 +304,7 @@ namespace RspLogger
         readonly List<Col> cols;
         readonly Dictionary<string, string> names;
         readonly List<string> rawKeys;
+        readonly List<string> hmiKeys;   // HMI 다시보기용 원시 워드 (_hmi.csv)
         readonly double intervalS, preS, postS;
         public string FilePath;
         public double T0;
@@ -289,10 +314,12 @@ namespace RspLogger
         Queue<Pending> pending;
         double? lastWritten, prevStartBit;
         Dictionary<string, double> prevSample;
-        StreamWriter f, rf;
+        StreamWriter f, rf, hf;
 
-        public Recorder(string outDir, List<Tag> tags, double intervalS = 1.0, double preS = 10.0, double postS = 30.0)
+        public Recorder(string outDir, List<Tag> tags, double intervalS = 1.0, double preS = 10.0, double postS = 30.0,
+            List<string> hmiKeys = null)
         {
+            this.hmiKeys = hmiKeys ?? new List<string>();
             OutDir = outDir;
             cols = tags.Cast<Col>().Concat(Calc.Derived).ToList();
             names = cols.ToDictionary(c => c.Key, c => c.Name);
@@ -341,6 +368,12 @@ namespace RspLogger
             Csv.Row(f, new[] { "시각", "경과초" }.Concat(cols.Select(c => c.Unit != "" && c.Unit != "-" ? c.Name + "(" + c.Unit + ")" : c.Name))
                 .Concat(new[] { "출탕구간번호", "이벤트" }));
             Csv.Row(rf, new[] { "시각", "경과초" }.Concat(rawKeys).Concat(new[] { "이벤트" }));
+            hf = null;
+            if (hmiKeys.Count > 0)
+            {
+                hf = new StreamWriter(Path.Combine(OutDir, Path.GetFileNameWithoutExtension(path) + "_hmi.csv"), false, new UTF8Encoding(true));
+                Csv.Row(hf, new[] { "시각", "경과초" }.Concat(hmiKeys));
+            }
             Event(ts, "Run 시작");
             return path;
         }
@@ -407,6 +440,7 @@ namespace RspLogger
             }
             f.Flush();
             rf.Flush();
+            if (hf != null) hf.Flush();
         }
 
         void Write(Pending p)
@@ -417,6 +451,8 @@ namespace RspLogger
                 .Concat(new[] { no, p.Ev }));
             Csv.Row(rf, head.Concat(rawKeys.Select(k => { long v; return p.Raws.TryGetValue(k, out v) ? v.ToString(App.Inv) : ""; }))
                 .Concat(new[] { p.Ev }));
+            if (hf != null && p.Ev == "" && hmiKeys.Any(p.Raws.ContainsKey))
+                Csv.Row(hf, head.Concat(hmiKeys.Select(k => { long v; return p.Raws.TryGetValue(k, out v) ? v.ToString(App.Inv) : ""; })));
             if (p.Ev == "")
             {
                 lastWritten = p.Ts;
@@ -484,6 +520,7 @@ namespace RspLogger
             }
             f.Close();
             rf.Close();
+            if (hf != null) hf.Close();
             WriteIndex(ts, results, sums);
             string path = FilePath;
             FilePath = null;

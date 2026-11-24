@@ -153,6 +153,7 @@ namespace RspLogger
             file.DropDownItems.Add("지난 기록 열기…", null, (s, e) => OpenHistory());
             file.DropDownItems.Add("태그 설정 · 환산 확인…", null, (s, e) => OpenTagEditor());
             file.DropDownItems.Add("PLC 접속 설정 (IP)…", null, (s, e) => OpenPlcSettings());
+            file.DropDownItems.Add("HMI 원본 파일 지정…", null, (s, e) => { if (HmiReplayForm.ChooseTds(this) != null) Restart(dev, "HMI 원본 파일 지정됨", "다시 시작하면 HMI 화면 값도 같이 기록합니다. 지금 다시 시작할까요?"); });
             file.DropDownItems.Add(new ToolStripSeparator());
             file.DropDownItems.Add(dev ? "현장 모드로 다시 시작" : "개발 모드(가상 PLC)로 다시 시작", null, (s, e) => SwitchMode());
             var help = new ToolStripMenuItem("도움말");
@@ -382,7 +383,8 @@ namespace RspLogger
             else if (r.Active) rec += "   |   출탕 " + r.Ejections.Count + "회";
             Func<string, string> bit = k => last.ContainsKey(k) ? (last[k] != 0 ? "ON" : "OFF") : "—";
             statusLbl.Text = "● " + connMsg + "   |   PLC " + host + "   |   RSP 리모콘(M382): " + bit("rsp_remote")
-                + "   |   스토퍼 상승(M151): " + bit("stopper_up") + "   |   기록: " + rec;
+                + "   |   스토퍼 상승(M151): " + bit("stopper_up") + "   |   기록: " + rec
+                + (Poller != null && Poller.HmiError != null ? "   |   HMI 화면 기록 중지: " + Poller.HmiError : "");
             statusLbl.ForeColor = connected ? Color.DarkGreen : Color.Firebrick;
             statusLbl.BackColor = r.Ejecting ? Color.FromArgb(255, 225, 190) : r.Active ? Color.FromArgb(255, 238, 238) : SystemColors.Control;
         }

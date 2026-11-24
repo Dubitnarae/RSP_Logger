@@ -59,6 +59,7 @@ namespace RspLogger
                 { "읽기 반복", Poll }, { "끊김 재접속", Backoff }, { "출탕 기록", EjectionRecording },
                 { "출탕 없음·같은 이름", NoEjectionDupName }, { "run_index 열 변경", IndexHeaderChange },
                 { "업데이트 버전 비교", VersionCompare }, { "업데이트 SHA256", Sha }, { "settings.toml", SettingsParse },
+                { "HMI 주소·숫자", HmiBasics }, { "HMI 워드 읽기", HmiPoll }, { "HMI 기록·다시보기", HmiRecord },
             };
             foreach (var t in tests)
             {
@@ -245,6 +246,70 @@ namespace RspLogger
             Check(got.Count >= 3, "3번 이상 읽음");
             Check(got.Count > 0 && Near(got[0]["p_upper"], 0.25), "환산값");
             Check(status.Count > 0 && status[status.Count - 1], "연결됨");
+        }
+
+        // ---------- HMI 화면 ----------
+        static void HmiBasics()
+        {
+            int bit;
+            Check(HmiScreen.KeyOf("M00118", out bit) == "@M11" && bit == 8, "M00118 → @M11 비트 8");
+            Check(HmiScreen.KeyOf("P0004A", out bit) == "@P4" && bit == 10, "P0004A");
+            Check(HmiScreen.KeyOf("D000401", out bit) == "@D401" && bit == -1, "D000401 → 워드");
+            Check(HmiScreen.KeyOf("T0603", out bit) == null && HmiScreen.KeyOf(null, out bit) == null, "T·C 영역·빈 주소는 안 읽음");
+            Check(HmiScreen.NextKey("@D380") == "@D381", "INT32 다음 워드");
+            Check(HmiScreen.FormatNumber(-123, 2) == "-1.23" && HmiScreen.FormatNumber(1234, 0) == "1234" && HmiScreen.FormatNumber(5, 1) == "0.5", "소수 자릿수");
+            string a = "[plc]\r\nhost = \"x\"\r\n";
+            var s1 = Settings.Parse(Settings.Upsert(a, "hmi", "file", "'C:\\a b\\x.TDS'"));
+            var s2 = Settings.Parse(Settings.Upsert(Settings.Upsert(a, "hmi", "file", "''"), "hmi", "file", "'D:\\y.tds'"));
+            Check(s1.Str("hmi.file") == "C:\\a b\\x.TDS" && s1.Str("plc.host") == "x" && s2.Str("hmi.file") == "D:\\y.tds", "[hmi] 없으면 추가·있으면 바꿈");
+            Check(s1.StrOr("hmi.nope", "d") == "d", "없는 항목 기본값");
+        }
+
+        static void HmiPoll()
+        {
+            var got = new List<Dictionary<string, long>>();
+            var vals = new List<Dictionary<string, double>>();
+            var plc = new FakePlc(0);
+            plc.SetWord("D401", 25);
+            plc.SetBit("M118", true);
+            Func<List<string>, Poller> make = keys => new Poller(new XgtClient("127.0.0.1", plc.Port, 0.5), Tags.Load(TagsPath()), 0.1,
+                (ts, v, r) => { lock (got) { got.Add(r); vals.Add(v); } }, (ok, m) => { }, keys);
+            var p = make(new List<string> { "@M11", "@D401" });
+            p.Start();
+            for (int i = 0; i < 50; i++) { lock (got) if (got.Count >= 2) break; Thread.Sleep(100); }
+            p.Stop();
+            Check(got.Count > 0 && got[0].ContainsKey("@M11") && ((got[0]["@M11"] >> 8) & 1) == 1 && got[0]["@D401"] == 25, "HMI 워드 읽음");
+            Check(vals.Count > 0 && !vals[0].Keys.Any(k => k.StartsWith("@")), "환산값에는 안 섞임");
+            // PLC가 HMI 주소를 거부하면 HMI 만 멈추고 공정값은 계속
+            lock (got) { got.Clear(); vals.Clear(); }
+            p = make(new List<string> { "@D70000" });
+            p.Start();
+            for (int i = 0; i < 50; i++) { lock (got) if (got.Count >= 3) break; Thread.Sleep(100); }
+            p.Stop();
+            plc.Stop();
+            Check(got.Count >= 3 && p.HmiError != null && Near(vals[2]["p_upper"], 0.25) && !got[2].Keys.Any(k => k.StartsWith("@")), "HMI 오류여도 공정값 계속");
+        }
+
+        static void HmiRecord()
+        {
+            string dir = NewDir();
+            var keys = new List<string> { "@D401", "@M11" };
+            var r = new Recorder(dir, Tags.Load(TagsPath()), 1.0, 10, 30, keys);
+            string p = r.Start(T, new Dictionary<string, string> { { "시료명", "H" } });
+            for (int i = 1; i <= 5; i++)
+                r.Add(T + i, new Dictionary<string, double> { { "p_upper", 0.25 } }, new Dictionary<string, long> { { "p_upper", 25 }, { "@D401", 20 + i }, { "@M11", 256 } });
+            r.Stop(T + 6);
+            string hp = HmiReplayForm.HmiCsvPath(p);
+            var stamps = new List<string>(); var secs = new List<double>(); var rows = new List<long?[]>(); var col = new Dictionary<string, int>();
+            HmiReplayForm.LoadHmiCsv(hp, stamps, secs, rows, col);
+            Check(File.Exists(hp) && rows.Count == 5 && rows[4][col["@D401"]] == 25 && rows[0][col["@M11"]] == 256 && Near(secs[0], 1), "_hmi.csv 기록·읽기");
+            Check(!File.Exists(HmiReplayForm.HmiCsvPath(Path.Combine(dir, "x.csv"))), "HMI 키 없으면 파일 안 만듦 (경로 규칙)");
+            string d2 = NewDir();
+            var r2 = new Recorder(d2, Tags.Load(TagsPath()));
+            string p2 = r2.Start(T, new Dictionary<string, string> { { "시료명", "N" } });
+            r2.Stop(T + 1);
+            Check(!File.Exists(HmiReplayForm.HmiCsvPath(p2)), "HMI 원본 미지정이면 _hmi.csv 없음");
+            using (var f = new HmiReplayForm(p, new HmiScreen(), new string[0])) Check(f.Text.Contains("H"), "다시보기 창 만들기");
         }
 
         static void Backoff()
